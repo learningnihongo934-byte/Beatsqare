@@ -1,6 +1,14 @@
 // Update log, newest first. Shown at #/updates; the title screen flags a version you haven't seen.
 export const CHANGELOG = [
   {
+    v: '1.4', date: '2026-11-10', title: 'Sharper BPM detection',
+    items: [
+      ['up', 'BPM detection scores every tempo from 70 to 200 on both beats and half-beats. That fixes half-time and triplet mix-ups like 80 vs 120 and 106 vs 160. It was checked against six real songs.'],
+      ['up', 'The first beat now locks onto the kick and snare, not offbeat hi-hats.'],
+      ['new', 'Import several .bsq or JSON files at once from song select.'],
+    ],
+  },
+  {
     v: '1.3', date: '2026-11-10', title: 'Menu music and a new song select',
     items: [
       ['new', 'The home screen plays a random song from the ones on this device, with Skip and Mute. The background rings pulse on its beat.'],

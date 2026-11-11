@@ -90,7 +90,7 @@ export async function songSelect(app, bar, nav, selId) {
       </div>
       <div class="ss-list" data-list role="listbox" aria-label="Songs"></div>
       <div class="ss-foot"><span class="lbl" data-count></span>
-        <label class="btn sm">${icon('up')}Import .bsq / JSON<input type="file" accept=".bsq,.json,application/json" hidden data-imp></label>
+        <label class="btn sm">${icon('up')}Import .bsq / JSON<input type="file" accept=".bsq,.json,application/json" multiple hidden data-imp></label>
         <a class="btn sm" href="#/create">New chart</a><a class="btn sm" href="#/catalog">Catalog</a></div>
     </div></section>`;
   const list = $('[data-list]'), det = $('[data-detail]');
@@ -170,8 +170,9 @@ export async function songSelect(app, bar, nav, selId) {
     const key = view[gi]?.key; sort = b.dataset.v; filter(); gi = Math.max(0, view.findIndex(g => g.key === key)); renderList(); select(gi);
   });
   $('[data-imp]').addEventListener('change', async e => {
-    try { const c = await importChartFile(e.target.files[0]); toast('Imported ' + c.title); nav('#/library/' + encodeURIComponent(c.id)); }
-    catch (err) { toast('Import failed: ' + err.message, true); }
+    const files = [...e.target.files]; let last = null, ok = 0;
+    for (const f of files) { try { toast(`Importing ${f.name}…`); last = await importChartFile(f); ok++; } catch (err) { toast(`${f.name}: ${err.message}`, true); } }
+    if (last) { toast(`Imported ${ok} file${ok === 1 ? '' : 's'}`); nav('#/library/' + encodeURIComponent(last.id)); }
     e.target.value = '';
   });
   const onKey = e => {

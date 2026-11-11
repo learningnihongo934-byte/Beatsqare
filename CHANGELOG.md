@@ -2,6 +2,12 @@
 
 Also in the game at `#/updates`.
 
+## v1.4 — Sharper BPM detection (2026-11-10)
+
+- **Improved:** BPM detection scores every tempo from 70 to 200 on both beats and half-beats. That fixes half-time and triplet mix-ups like 80 vs 120 and 106 vs 160. It was checked against six real songs.
+- **Improved:** The first beat now locks onto the kick and snare, not offbeat hi-hats.
+- **New:** Import several .bsq or JSON files at once from song select.
+
 ## v1.3 — Menu music and a new song select (2026-11-10)
 
 - **New:** The home screen plays a random song from the ones on this device, with Skip and Mute. The background rings pulse on its beat.

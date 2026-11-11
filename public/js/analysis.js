@@ -102,38 +102,28 @@ export function detectBpm(A) {
     const mean = acc / Math.min(i + 1, 2 * w);
     env[Math.max(0, i - w)] = Math.max(0, flux[Math.max(0, i - w)] - mean);
   }
-  const minLag = Math.floor(fr * 60 / 200), maxLag = Math.ceil(fr * 60 / 60);
-  let best = 0, bestLag = minLag;
-  const score = new Float32Array(maxLag + 2);
-  const N = Math.min(n, Math.floor(fr * 120)); // 2 minutes is plenty
-  for (let lag = minLag; lag <= maxLag; lag++) {
-    let s = 0; for (let i = 0; i + lag < N; i++) s += env[i] * env[i + lag];
-    const bpm = 60 * fr / lag, prior = Math.exp(-0.5 * (Math.log2(bpm / 125) / 0.9) ** 2);
-    score[lag] = s * prior;
-    if (score[lag] > best) { best = score[lag]; bestLag = lag; }
-  }
-  const a = score[bestLag - 1] || 0, b = score[bestLag], c = score[bestLag + 1] || 0;
-  const den = a - 2 * b + c, lag = den ? bestLag + 0.5 * (a - c) / den : bestLag;
-  let bpm = 60 * fr / lag;
-  while (bpm < 75) bpm *= 2;
-  while (bpm > 190) bpm /= 2;
-  // fine search: bpm ± 2 and phase, maximise the comb sum of the onset envelope on beat times
-  let top = -1, topBpm = bpm, topPhase = 0;
-  for (let cand = bpm - 2; cand <= bpm + 2; cand += 0.02) {
+  // Comb search over 70–200 BPM: mean onset strength on the beats plus half the strength on the half-beats.
+  // The half-beat term picks the tempo whose 8ths also land on the song's event grid (fixes 80 vs 120, 106 vs 160 confusions).
+  const mean = (per, ph) => { let s = 0, h = 0, k = 0; for (let t = ph; t < A.duration; t += per) { s += envAt(env, fr, t0, t); h += envAt(env, fr, t0, t + per / 2); k++; } return (s + 0.5 * h) / Math.max(1, k); };
+  let top = -1, topBpm = 120, topPhase = 0;
+  for (let cand = 70; cand <= 200; cand += 0.1) {
     const per = 60 / cand;
-    for (let ph = 0; ph < per; ph += per / 48) {
-      let s = 0;
-      for (let t = ph; t < A.duration; t += per) s += envAt(env, fr, t0, t) + 0.5 * envAt(env, fr, t0, t + per / 2);
-      if (s > top) { top = s; topBpm = cand; topPhase = ph; }
-    }
+    for (let ph = 0; ph < per; ph += per / 32) { const s = mean(per, ph); if (s > top) { top = s; topBpm = cand; topPhase = ph; } }
   }
+  const coarse = topBpm; top = -1;
+  for (let cand = coarse - 0.15; cand <= coarse + 0.15; cand += 0.005) {
+    const per = 60 / cand;
+    for (let ph = 0; ph < per; ph += per / 96) { const s = mean(per, ph); if (s > top) { top = s; topBpm = cand; topPhase = ph; } }
+  }
+  while (topBpm < 95) topBpm *= 2; // half-time reads double up; the phase stays on a beat
   const r = Math.round(topBpm);
-  if (Math.abs(topBpm - r) < 0.12) topBpm = r;
+  if (Math.abs(topBpm - r) < 0.08) topBpm = r;
   else topBpm = Math.round(topBpm * 100) / 100;
-  // re-solve phase for the final tempo
+  // re-solve phase for the final tempo on kick + snare (low + mid bands), so beats land on the drums, not offbeat hats
   const per = 60 / topBpm; let pb = -1;
-  for (let ph = 0; ph < per; ph += per / 96) {
-    let s = 0; for (let t = ph; t < A.duration; t += per) s += envAt(env, fr, t0, t);
+  const drum = new Float32Array(n); for (let i = 0; i < n; i++) drum[i] = (A.low ? A.low[i] + 0.7 * A.mid[i] : env[i]);
+  for (let ph = 0; ph < per; ph += per / 192) {
+    let s = 0; for (let t = ph; t < A.duration; t += per) s += envAt(drum, fr, t0, t);
     if (s > pb) { pb = s; topPhase = ph; }
   }
   return { bpm: topBpm, offset: +topPhase.toFixed(4) };

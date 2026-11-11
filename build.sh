@@ -14,8 +14,8 @@ case "$1" in
     $W dev --port 8790 ;;
   deploy)
     check
-    $W d1 migrations apply beatsqare --remote
-    $W deploy ;;
+    # the first remote call sometimes times out; try twice
+    for i in 1 2; do $W d1 migrations apply beatsqare --remote && $W deploy && break; echo "retrying…"; done ;;
   check) check ;;
   *) echo "usage: ./build.sh dev | deploy | check"; exit 1 ;;
 esac

@@ -2,6 +2,16 @@
 
 Also in the game at `#/updates`.
 
+## v1.7 — The screen is the box (2026-11-11)
+
+- **New:** Home is the game box. Sides and corners are destinations (Play, Create, Songs, Catalog / Profile, Shop, Settings, Updates). Arrow keys or WASD aim the ball, two keys aim at a corner, Enter or a second press goes. On phones, swipe to aim and lift to go.
+- **New:** Notes fly in on the menu music’s beat and light up the box sides.
+- **New:** The whole screen is framed in the four side colours. Navigation moved to an edge rail with vertical labels (a bottom bar on phones).
+- **New:** New controls throughout: bracket buttons with a sliding square, striped chamfered primary buttons, keycap toggles, square-knob switches, bracket inputs.
+- **New:** Videos: .bsq packs can carry the song’s video. Uploading an mp4 keeps its video, and Edit info can attach one to any song.
+- **New:** Background video: turn it on in Settings (or with the Video button on song select) and the video plays dimmed behind the notes, synced to the song.
+- **Improved:** Phone layouts fixed across home, song select, catalog, shop and settings.
+
 ## v1.6 — Prize counter and a livelier cabinet (2026-11-11)
 
 - **New:** Tokens and levels: every real play earns tokens and XP. You get bonuses for full combos, all perfects, new bests, your first play of the day and levelling up.

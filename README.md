@@ -31,6 +31,8 @@ A `.bsq` file is one song plus every chart for it, like an osu! `.osz`. It holds
 - **Import:** Play → *Import .bsq or chart JSON*. The audio stays in your browser; re-importing the same pack updates its charts instead of duplicating them.
 - **Export:** *Export .bsq* in song select or the editor bundles the song with every chart on this device that uses it.
 
+**Videos:** a pack can also carry the song's video (the header's `video` field; the bytes come after the audio and cover). Uploading an mp4 keeps its video, and *Edit info* attaches one to any song. Turn on **Background video** in Settings (or with the Video button on song select) and it plays dimmed behind the notes, synced to the song. To add a video to an existing pack: `node tools/bsq-video.mjs "Song.bsq" "Song.mp4"`.
+
 **Autoplay** (song select → *Autoplay · watch it*) plays a chart perfectly by itself. It doesn't count toward your best score or the leaderboard.
 
 ## Songs

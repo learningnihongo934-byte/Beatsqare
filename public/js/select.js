@@ -1,6 +1,6 @@
 // Song select: song wheel on the right (one row per song), jacket + difficulty tabs + chart graph on the left.
 import { songKey } from './audio.js';
-import { songMeta, setSongMeta, askSongInfo, artUrl, getArt, setArt, readTags } from './util.js';
+import { songMeta, setSongMeta, askSongInfo, artUrl, getArt, setArt, readTags, hasVideo, setVideo, getSettings, saveSettings } from './util.js';
 import { $, $$, esc, icon, toast, idb, getBest, fmtTime, fmtNum, clamp, uid, downloadText, slug, COLORS, DIFFS } from './util.js';
 import { DEMO_CHARTS, importChartFile } from './charts.js';
 import { chartKey } from './game.js';
@@ -46,7 +46,7 @@ async function songGroups() {
     if (pic) await setArt(g.key, pic);
   }
   try { localStorage.setItem('bsq.artTried', JSON.stringify([...tried])); } catch {}
-  for (const g of map.values()) g.artUrl = (await artUrl(g.key)) || g.song.art || null;
+  for (const g of map.values()) { g.artUrl = (await artUrl(g.key)) || g.song.art || null; g.video = await hasVideo(g.key); }
   return [...map.values()];
 }
 
@@ -147,6 +147,7 @@ export async function songSelect(app, bar, nav, selId) {
       <div class="ss-act">
         <button class="btn pri ss-play" data-a="play">${icon('play')}Play <span class="keycap">Enter</span></button>
         <button class="btn" data-a="auto" style="--c:var(--ball)">${icon('play')}Autoplay</button>
+        ${g.video ? `<button class="btn ${getSettings().bgVideo ? 'on' : ''}" data-a="vid" style="--c:var(--right)" title="Play the song's video behind the notes">Video ${getSettings().bgVideo ? 'on' : 'off'}</button>` : ''}
         ${own ? `<a class="btn" href="#/edit/${encodeURIComponent(c.id)}" style="--c:var(--left)">${icon('edit')}Edit</a>` : `<button class="btn" data-a="copy" style="--c:var(--left)">${icon('edit')}Edit a copy</button>`}
         <button class="btn" data-a="pack" title="Song + every chart for it in one file">${icon('down')}.bsq</button>
         ${!c.builtin ? `<button class="btn" data-a="del" style="--c:var(--bad)" aria-label="Remove chart">${icon('x')}</button>` : ''}
@@ -172,16 +173,18 @@ export async function songSelect(app, bar, nav, selId) {
     if (a === 'info') {
       const cur = await getArt(g.key);
       const r = await askSongInfo({ title: g.title, artist: g.artist }, 'Edit song info', {
-        art: cur, fromFile: async () => { const raw = await idb.audio(g.key).catch(() => null); return raw ? readTags(raw)?.picture || null : null; },
+        art: cur, video: g.video, fromFile: async () => { const raw = await idb.audio(g.key).catch(() => null); return raw ? readTags(raw)?.picture || null : null; },
       });
       if (!r) return;
       setSongMeta(g.key, { title: r.title, artist: r.artist });
       if ('art' in r) await setArt(g.key, r.art);
+      if ('video' in r) await setVideo(g.key, r.video);
       for (const ch of g.charts) if (!ch.builtin) { const suffix = (ch.title.match(/ \((edit|my chart|auto)\)$/) || [''])[0]; await idb.putChart({ ...ch, title: r.title + suffix, artist: r.artist, updated: Date.now() }); }
       const key = g.key; groups = await songGroups(); filter(); gi = Math.max(0, view.findIndex(x => x.key === key)); renderList(); select(gi, false);
       toast('Song info saved');
       return;
     }
+    if (a === 'vid') { saveSettings({ bgVideo: !getSettings().bgVideo }); renderDetail(); toast(getSettings().bgVideo ? 'Background video on' : 'Background video off'); return; }
     if (a === 'play') go();
     if (a === 'auto') go(true);
     if (a === 'pack') { toast('Packing…'); try { downloadBytes(slug(g.title) + '.bsq', await exportPack(c)); } catch (err) { toast('Export failed: ' + err.message, true); } }

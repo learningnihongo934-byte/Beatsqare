@@ -3,6 +3,8 @@ import { ctx, Player, loadSong, hitSound, missSound, energy } from './audio.js';
 import { points as timingPoints, beatAt } from './timing.js';
 import { drawBg, drawSide, drawTap, drawBall, spawnHit, stepParts } from './cosmetics.js';
 import { equipped, reward, levelOf, profile, TOKEN, fmtTok } from './profile.js';
+import { getVideo } from './util.js';
+import { songKey } from './audio.js';
 import { DIR, COLORS, BALL, BAD, OPP, adjacent, getSettings, approachTime, setBest, getBest, api, esc, fmtNum, icon, clamp, $ } from './util.js';
 
 // Tight windows (prototype: ±110 ms total, <50 ms = top grade)
@@ -51,6 +53,24 @@ export async function playChart(chart, opts = {}) {
   root.querySelector('[data-load]').remove();
 
   const player = new Player(buffer);
+  // background video (Settings → Background video, and the song has one)
+  let vid = null, vidUrl = null;
+  if (S.bgVideo) {
+    const blob = await getVideo(songKey(chart.song)).catch(() => null);
+    if (blob) {
+      vidUrl = URL.createObjectURL(blob);
+      vid = Object.assign(document.createElement('video'), { src: vidUrl, muted: true, playsInline: true, preload: 'auto' });
+      vid.setAttribute('playsinline', '');
+      await new Promise(r => { vid.addEventListener('loadeddata', r, { once: true }); vid.addEventListener('error', r, { once: true }); setTimeout(r, 4000); });
+      if (vid.error || !vid.videoWidth) { URL.revokeObjectURL(vidUrl); vid = null; vidUrl = null; }
+    }
+  }
+  function syncVideo(t) {
+    if (!vid) return;
+    if (paused || ended || t < 0 || t > vid.duration) { if (!vid.paused) vid.pause(); if (t < 0 && vid.currentTime > 0.05) vid.currentTime = 0; return; }
+    if (vid.paused) { vid.currentTime = t; vid.play().catch(() => {}); }
+    else if (Math.abs(vid.currentTime - t) > 0.12) vid.currentTime = t;
+  }
   const TP = timingPoints(chart);
   const approach = approachTime();
   const startAt = Math.max(0, opts.start || 0);
@@ -221,6 +241,7 @@ export async function playChart(chart, opts = {}) {
     removeEventListener('pointermove', onPMove); removeEventListener('pointerup', onPUp); removeEventListener('pointercancel', onPUp);
     removeEventListener('blur', onBlur); document.removeEventListener('visibilitychange', onVis);
     cancelAnimationFrame(raf); root.remove(); document.body.classList.remove('playing'); current = null;
+    if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); } if (vidUrl) URL.revokeObjectURL(vidUrl);
   }
 
   // ---------- main loop
@@ -257,6 +278,7 @@ export async function playChart(chart, opts = {}) {
     const [tx, ty] = target(), k = 1 - Math.exp(-dt * 45);
     ball.x += (tx - ball.x) * k; ball.y += (ty - ball.y) * k;
     trail.unshift([ball.x, ball.y]); if (trail.length > 18) trail.pop();
+    syncVideo(now);
     draw(now - S.visualOffset / 1000, dt);
     // hud
     const sc = scoreNow();
@@ -291,7 +313,12 @@ export async function playChart(chart, opts = {}) {
     g.translate(sx, sy);
     g.lineCap = 'square';
     // background (equipped: tunnel / stars / grid floor / rain / void), reacts to bass/mid/high
-    drawBg(g, EQ.bg, { X, Y, B, W, H, dt, state: bgState, newBeat, bar: ((beatIdx % 4) + 4) % 4 === 0, beatLen, pulse, eLow, eMid, eHigh });
+    if (vid && vid.readyState >= 2) {
+      // cover-fit the video, dimmed so the notes stay readable; it breathes a little with the bass
+      const vw = vid.videoWidth, vh = vid.videoHeight, sc = Math.max(W / vw, H / vh) * (1.02 + pulse * 0.01);
+      g.globalAlpha = 1; g.drawImage(vid, (W - vw * sc) / 2, (H - vh * sc) / 2, vw * sc, vh * sc);
+      g.fillStyle = `rgba(5,5,10,${Math.min(0.92, (S.videoDim ?? 0.55) - eLow * 0.08)})`; g.fillRect(0, 0, W, H);
+    } else drawBg(g, EQ.bg, { X, Y, B, W, H, dt, state: bgState, newBeat, bar: ((beatIdx % 4) + 4) % 4 === 0, beatLen, pulse, eLow, eMid, eHigh });
     // lane guides
     g.setLineDash([3, 9]); g.lineWidth = 1;
     for (let L = 0; L < 4; L++) {

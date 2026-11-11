@@ -32,7 +32,7 @@ const DEFAULTS = {
   visualOffset: 0,     // ms; positive = draw notes later
   speed: 5,            // 1..10 → approach time
   volume: 0.85, hitVolume: 0.5, hitsounds: true,
-  crt: true, shake: true, particles: true, menuMusic: true, uiSounds: true,
+  crt: true, shake: true, particles: true, menuMusic: true, uiSounds: true, bgVideo: false, videoDim: 0.55,
   handle: '',
   theme: null, // { colors: [up, right, down, left], ball }
 };
@@ -77,6 +77,10 @@ export function askSongInfo(info, heading = 'Song info', opts = {}) {
           <div class="row"><label class="btn sm">Choose image<input type="file" accept="image/*" hidden data-img></label>
           ${opts.fromFile ? '<button class="btn sm" type="button" data-fromfile>From song file</button>' : ''}
           <button class="btn sm" type="button" data-noart>Remove</button></div></div></div>
+      ${opts.video !== undefined ? `<div class="field" style="margin-top:14px"><span class="lbl">Background video</span>
+        <div class="row"><span class="muted" data-vname style="font-size:12px">${opts.video ? 'Has a video' : 'None'}</span>
+          <label class="btn sm">Choose video<input type="file" accept="video/*,.mp4,.webm,.mov" hidden data-vid></label>
+          <button class="btn sm" type="button" data-novid>Remove</button></div></div>` : ''}
       <div class="row" style="margin-top:18px"><button class="btn pri" style="--c:var(--down)">Save</button><button class="btn" type="button" data-x>Cancel</button></div></form>`;
     document.body.appendChild(ov);
     const f = ov.querySelector('form'), thumb = ov.querySelector('[data-thumb]');
@@ -84,10 +88,14 @@ export function askSongInfo(info, heading = 'Song info', opts = {}) {
     showArt();
     ov.querySelector('[data-img]').onchange = async e => { const file = e.target.files[0]; if (!file) return; try { art = await squareImage(file); artChanged = true; showArt(); } catch { toast('Couldn’t read that image', true); } };
     ov.querySelector('[data-noart]').onclick = () => { art = null; artChanged = true; showArt(); };
+    let video, videoChanged = false;
+    const vi = ov.querySelector('[data-vid]'), vn = ov.querySelector('[data-vname]');
+    if (vi) vi.onchange = e => { const file = e.target.files[0]; if (!file) return; video = file; videoChanged = true; vn.textContent = file.name + ' · ' + (file.size / 1048576).toFixed(1) + ' MB'; };
+    const nv = ov.querySelector('[data-novid]'); if (nv) nv.onclick = () => { video = null; videoChanged = true; vn.textContent = 'None'; };
     const ff = ov.querySelector('[data-fromfile]');
     if (ff) ff.onclick = async () => { const pic = await opts.fromFile(); if (!pic) return toast('That song file has no cover image', true); art = await squareImage(new Blob([pic.data], { type: pic.mime })); artChanged = true; showArt(); };
     f.title.focus(); f.title.select();
-    f.onsubmit = e => { e.preventDefault(); ov.remove(); res({ title: f.title.value.trim() || 'Untitled', artist: f.artist.value.trim(), ...(artChanged || opts.art ? { art } : {}) }); };
+    f.onsubmit = e => { e.preventDefault(); ov.remove(); res({ title: f.title.value.trim() || 'Untitled', artist: f.artist.value.trim(), ...(artChanged || opts.art ? { art } : {}), ...(videoChanged ? { video } : {}) }); };
     ov.querySelector('[data-x]').onclick = () => { ov.remove(); res(null); };
   });
 }
@@ -291,3 +299,8 @@ export async function squareImage(blob) {
   const jpg = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
   return { mime: 'image/jpeg', data: await jpg.arrayBuffer() };
 }
+
+// ---------- background videos (per song, 'video:<songKey>' → Blob)
+export const getVideo = key => idb.audio('video:' + key).catch(() => null);
+export async function setVideo(key, blob) { if (blob) await idb.putAudio('video:' + key, blob); else await idb.delAudio('video:' + key); }
+export const hasVideo = async key => !!(await getVideo(key));

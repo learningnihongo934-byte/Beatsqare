@@ -1,6 +1,18 @@
 // Update log, newest first. Shown at #/updates; the title screen flags a version you haven't seen.
 export const CHANGELOG = [
   {
+    v: '1.7', date: '2026-11-11', title: 'The screen is the box',
+    items: [
+      ['new', 'Home is the game box. Sides and corners are destinations (Play, Create, Songs, Catalog / Profile, Shop, Settings, Updates). Arrow keys or WASD aim the ball, two keys aim at a corner, Enter or a second press goes. On phones, swipe to aim and lift to go.'],
+      ['new', 'Notes fly in on the menu music’s beat and light up the box sides.'],
+      ['new', 'The whole screen is framed in the four side colours. Navigation moved to an edge rail with vertical labels (a bottom bar on phones).'],
+      ['new', 'New controls throughout: bracket buttons with a sliding square, striped chamfered primary buttons, keycap toggles, square-knob switches, bracket inputs.'],
+      ['new', 'Videos: .bsq packs can carry the song’s video. Uploading an mp4 keeps its video, and Edit info can attach one to any song.'],
+      ['new', 'Background video: turn it on in Settings (or with the Video button on song select) and the video plays dimmed behind the notes, synced to the song.'],
+      ['up', 'Phone layouts fixed across home, song select, catalog, shop and settings.'],
+    ],
+  },
+  {
     v: '1.6', date: '2026-11-11', title: 'Prize counter and a livelier cabinet',
     items: [
       ['new', 'Tokens and levels: every real play earns tokens and XP. You get bonuses for full combos, all perfects, new bests, your first play of the day and levelling up.'],

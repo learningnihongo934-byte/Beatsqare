@@ -2,6 +2,15 @@
 
 Also in the game at `#/updates`.
 
+## v1.6 — Prize counter and a livelier cabinet (2026-11-11)
+
+- **New:** Tokens and levels: every real play earns tokens and XP. You get bonuses for full combos, all perfects, new bests, your first play of the day and levelling up.
+- **New:** Prize counter (Shop): ball skins, trails, hit effects, note skins, box frames, backgrounds, hit-sound packs, premium themes and titles, each with a live preview.
+- **New:** Profile: player card, lifetime stats, grade spread, recent plays and 24 achievements that pay tokens (some unlock titles).
+- **New:** Daily challenge: one of your charts and a goal every day, for bonus tokens.
+- **New:** Title screen: a live box plays itself to the menu music in your equipped cosmetics, with a scrolling marquee underneath.
+- **New:** CRT power-on when the game opens, scanline wipes between screens, quiet menu sounds (Settings → Menu sounds) and a level/token chip in the top bar.
+
 ## v1.5 — Tempo changes, themes and song names (2026-11-11)
 
 - **New:** Themes: Settings → Theme has presets (Vector, Sunset, Ocean, Phosphor, Amber, Sakura) and a colour picker for each side and the ball. It applies to the game, editor and menus.

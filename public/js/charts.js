@@ -2,6 +2,7 @@
 import { DEMO, sectionOf } from './audio.js';
 import { idb, uid, DIFFS } from './util.js';
 import { isPack, importPack } from './pack.js';
+import { unlock } from './profile.js';
 
 const LEAD = [69, 72, 74, 76, 74, 72, 69, 67, 69, 72, 76, 79, 76, 74, 72, 74];
 const pitchLane = (m, prev) => m >= 76 ? 0 : m <= 67 ? 2 : (prev === 1 ? 3 : 1);
@@ -83,6 +84,7 @@ export async function importChartFile(file) {
   if (isPack(buf)) {
     const made = await importPack(buf);
     if (!made.length) throw new Error('pack has no charts');
+    unlock('pack_import');
     return made.find(c => c.difficulty === 'Normal') || made[0];
   }
   const d = JSON.parse(new TextDecoder().decode(buf));

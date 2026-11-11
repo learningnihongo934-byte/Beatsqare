@@ -1,6 +1,17 @@
 // Update log, newest first. Shown at #/updates; the title screen flags a version you haven't seen.
 export const CHANGELOG = [
   {
+    v: '1.6', date: '2026-11-11', title: 'Prize counter and a livelier cabinet',
+    items: [
+      ['new', 'Tokens and levels: every real play earns tokens and XP. You get bonuses for full combos, all perfects, new bests, your first play of the day and levelling up.'],
+      ['new', 'Prize counter (Shop): ball skins, trails, hit effects, note skins, box frames, backgrounds, hit-sound packs, premium themes and titles, each with a live preview.'],
+      ['new', 'Profile: player card, lifetime stats, grade spread, recent plays and 24 achievements that pay tokens (some unlock titles).'],
+      ['new', 'Daily challenge: one of your charts and a goal every day, for bonus tokens.'],
+      ['new', 'Title screen: a live box plays itself to the menu music in your equipped cosmetics, with a scrolling marquee underneath.'],
+      ['new', 'CRT power-on when the game opens, scanline wipes between screens, quiet menu sounds (Settings → Menu sounds) and a level/token chip in the top bar.'],
+    ],
+  },
+  {
     v: '1.5', date: '2026-11-11', title: 'Tempo changes, themes and song names',
     items: [
       ['new', 'Themes: Settings → Theme has presets (Vector, Sunset, Ocean, Phosphor, Amber, Sakura) and a colour picker for each side and the ball. It applies to the game, editor and menus.'],

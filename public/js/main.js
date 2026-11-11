@@ -3,11 +3,15 @@ import { ctx, ac, loadSong, outAt, outNow, click, energy, applyVolume, rememberB
 import { songMeta, askSongInfo, readTags, tidySongInfo, THEMES, applyTheme, setArt } from './util.js';
 import { $, $$, esc, icon, toast, api, idb, getSettings, saveSettings, getBest, fmtTime, fmtNum, clamp, uploadFile, downloadText, slug, COLORS, DIFFS, approachTime, uid } from './util.js';
 import { DEMO_CHARTS, newChart, saveCatalogChart, importChartFile } from './charts.js';
-import { playChart, chartKey } from './game.js';
+import { playChart, chartKey, abortGame } from './game.js';
 import { openEditor, getAnalysis } from './editor.js';
 import { detectBpm, detectSections, autoChartTimed } from './analysis.js';
 import { exportPack, downloadBytes } from './pack.js';
 import { CHANGELOG, LATEST } from './changelog.js';
+import { shop, profileScreen, eqNow } from './meta.js';
+import { profile, levelOf, daily as dailyOf, TOKEN, fmtTok, titleName, unlock, ownedThemes } from './profile.js';
+import { MiniScene } from './cosmetics.js';
+import { uiSound } from './audio.js';
 import { songSelect, credit } from './select.js';
 import { playRandom, skip, toggleMute, stopMusic, onMusic, nowPlaying, beatPos, musicPos } from './music.js';
 
@@ -16,14 +20,19 @@ const S = getSettings();
 saveSettings();
 let closeScreen = null;
 
-const NAV = [['#/library', 'Play', 'up'], ['#/create', 'Create', 'right'], ['#/songs', 'Songs', 'down'], ['#/catalog', 'Catalog', 'left'], ['#/settings', 'Settings', 'up']];
+const NAV = [['#/library', 'Play', 'up'], ['#/create', 'Create', 'right'], ['#/songs', 'Songs', 'down'], ['#/catalog', 'Catalog', 'left'], ['#/shop', 'Shop', 'up'], ['#/settings', 'Settings', 'right']];
+const pchip = () => { const P = profile(), lv = levelOf(); return `<span class="pl">LV ${lv.level}</span><span class="xpbar"><i style="width:${(lv.into / lv.need * 100).toFixed(1)}%"></i></span><span class="pt">${TOKEN} ${fmtTok(P.tokens)}</span>`; };
+addEventListener('bsq:profile', () => document.querySelectorAll('[data-pchip]').forEach(el => (el.innerHTML = pchip())));
 const bar = active => `<header class="bar"><div class="bar-in">
   <a class="logo" href="#/"><span class="logo-mark"><i></i><i></i><i></i><i></i><b></b></span><span class="logo-word">BEATSQARE</span></a>
   <nav class="nav">${NAV.map(([h, t, c], i) => `<a href="${h}" class="${active === h ? 'on' : ''}" style="--c:var(--${c})"><span>0${i + 1}</span>${t}</a>`).join('')}</nav>
+  <a class="pchip ${active === '#/profile' ? 'on' : ''}" href="#/profile" data-pchip title="Profile">${pchip()}</a>
 </div></header>`;
 
 // ---------- router
 async function route() {
+  wipe();
+  abortGame();
   if (closeScreen) { const c = closeScreen; closeScreen = null; await c(); }
   const nextName = ((location.hash || '#/').match(/^#\/([\w-]*)/) || [])[1];
   if (nextName === 'play' || nextName === 'edit') stopMusic(0.3);
@@ -40,6 +49,8 @@ async function route() {
   if (name === 'catalog') return catalog();
   if (name === 'settings') return settings();
   if (name === 'updates') return updates();
+  if (name === 'shop') { closeScreen = shop(app, bar); return; }
+  if (name === 'profile') return profileScreen(app, bar);
   title();
 }
 const nav = h => { if (location.hash === h) route(); else location.hash = h; };
@@ -57,17 +68,34 @@ function title() {
       <p>Notes fly in on four lanes. Snap the ball to the side they hit, hold through the tails, flick to the corner for chords. Then build your own charts on any song.</p>
       <div class="np" data-np></div>
     </div>
+    <div class="attract-slot" data-attract aria-hidden="true"></div>
     <nav class="menu" aria-label="Main menu">
-      ${[['#/library', 'Play', 'Song select', 'up'], ['#/create', 'Create', 'Level editor', 'right'], ['#/songs', 'Songs', 'Search · upload', 'down'], ['#/catalog', 'Catalog', 'Community charts', 'left'], ['#/settings', 'Settings', 'Offset · speed', 'up']]
+      ${[['#/library', 'Play', 'Song select', 'up'], ['#/create', 'Create', 'Level editor', 'right'], ['#/songs', 'Songs', 'Search · upload', 'down'], ['#/catalog', 'Catalog', 'Community charts', 'left'], ['#/shop', 'Shop', 'Prize counter', 'up'], ['#/profile', 'Profile', 'Level · achievements', 'right'], ['#/settings', 'Settings', 'Theme · offset', 'down']]
         .map(([h, t, d, c], i) => `<a href="${h}" style="--c:var(--${c})"><span class="n">0${i + 1}</span><span class="t">${t}</span><span class="d">${d}</span></a>`).join('')}
     </nav>
     <div class="title-foot lbl">
       <span><span class="keycap">↑</span><span class="keycap">←</span><span class="keycap">↓</span><span class="keycap">→</span> or <span class="keycap">W</span><span class="keycap">A</span><span class="keycap">S</span><span class="keycap">D</span> snap to a side</span>
       <span>Two keys = corner chord</span><span>Phone: swipe, diagonal = corner</span><span><span class="keycap">Esc</span> pause</span>
+      <span class="dim">·</span>
       <a href="#/updates" style="margin-left:auto;text-decoration:none;color:var(--ink)">v${LATEST} · Update log${seenVersion() !== LATEST ? ' <span class="badge" style="color:var(--ball)">New</span>' : ''}</a>
-    </div></section>`;
+    </div>
+    <div class="marquee" aria-hidden="true"><div class="mq" data-mq></div></div></section>`;
   $('.menu a').focus({ preventScroll: true });
   arrowNav($$('.menu a'));
+  attractEl = $('[data-attract]');
+  // marquee: daily challenge, player, last play, tips
+  (async () => {
+    const charts = [...DEMO_CHARTS, ...(await idb.charts().catch(() => []))], dl = dailyOf(charts), P = profile(), lv = levelOf(), last = (P.recent || [])[0];
+    const tips = ['Two keys at once send the ball to a corner', 'Pierce notes come from the opposite side, hit the side of their colour', 'Detect in the editor finds tempo changes', 'Drop a .bsq on Play to import a whole song', 'Calibrate your offset in Settings if hits feel early or late', 'Everything in the prize counter is cosmetic'];
+    const items = [
+      dl ? `Daily · ${esc(dl.title)} ${esc(dl.difficulty)} · ${esc(dl.goal.text)} · ${dl.done ? 'complete' : '+' + dl.reward + ' tokens'}` : null,
+      `${esc(getSettings().handle)} · ${esc(titleName())} · level ${lv.level} · ${fmtTok(P.tokens)} tokens`,
+      last ? `Last play · ${esc(last.title)} ${esc(last.difficulty)} · ${esc(last.grade)} · ${fmtTok(last.score)}` : 'Insert coin · press any arrow',
+      ...tips.sort(() => Math.random() - 0.5).slice(0, 3),
+    ].filter(Boolean);
+    const run = items.map(t => `<span>${t}</span><i>◆</i>`).join('');
+    const mq = $('[data-mq]'); if (mq) mq.innerHTML = run + run;
+  })();
   const np = $('[data-np]');
   const draw = info => {
     if (!getSettings().menuMusic) { np.innerHTML = `<span class="lbl">Menu music off</span><button class="btn sm" data-np="mute">Turn on</button>`; return; }
@@ -83,7 +111,7 @@ function title() {
   addEventListener('pointerdown', gesture, { once: true }); addEventListener('keydown', gesture, { once: true });
   let raf = requestAnimationFrame(function tick() { raf = requestAnimationFrame(tick); const i = nowPlaying(), b = $('[data-npbar]'); if (i && b && i.duration) b.style.width = Math.min(100, musicPos() / i.duration * 100) + '%'; });
   const closeNav = closeScreen;
-  closeScreen = () => { closeNav && closeNav(); off(); cancelAnimationFrame(raf); removeEventListener('pointerdown', gesture); removeEventListener('keydown', gesture); };
+  closeScreen = () => { closeNav && closeNav(); off(); cancelAnimationFrame(raf); removeEventListener('pointerdown', gesture); removeEventListener('keydown', gesture); attractEl = null; };
 }
 function arrowNav(items) {
   const onKey = e => {
@@ -108,6 +136,7 @@ async function play(arg) {
   bgOn = false; app.innerHTML = '';
   let action = 'restart';
   while (action === 'restart') ({ action } = await playChart(c, { autoplay, editable: !c.builtin && !c.id.startsWith('cat-') }));
+  if (action === 'nav') return;
   if (action === 'edit') nav('#/edit/' + encodeURIComponent(c.id));
   else nav('#/library/' + encodeURIComponent(c.id));
 }
@@ -307,7 +336,7 @@ function settings() {
     ['volume', 'Music volume', 0, 1, 0.05, v => Math.round(v * 100) + '%'],
     ['hitVolume', 'Hit sound volume', 0, 1, 0.05, v => Math.round(v * 100) + '%'],
   ];
-  const toggles = [['menuMusic', 'Menu music'], ['hitsounds', 'Hit sounds'], ['crt', 'CRT bloom + scanlines'], ['shake', 'Screen shake on miss'], ['particles', 'Hit particles']];
+  const toggles = [['menuMusic', 'Menu music'], ['uiSounds', 'Menu sounds'], ['hitsounds', 'Hit sounds'], ['crt', 'CRT bloom + scanlines'], ['shake', 'Screen shake on miss'], ['particles', 'Hit particles']];
   app.innerHTML = `${bar('#/settings')}<section class="page">
     <div class="span-12 head" style="margin:0"><h2 class="sec-title">Settings</h2><span class="lbl">Saved on this device</span></div>
     <div class="span-12 frame pad theme" data-theme style="--c:var(--right)"></div>
@@ -326,6 +355,7 @@ function settings() {
     </div></section>`;
   // ---- theme: presets + custom colour per side and ball
   const SIDE = ['Up', 'Right', 'Down', 'Left'];
+  const allThemes = () => [...THEMES, ...ownedThemes().map(i => ({ name: i.name, colors: i.colors, ball: i.ball }))];
   const curTheme = () => S.theme && S.theme.colors ? S.theme : { ...THEMES[0], colors: [...THEMES[0].colors] };
   const swatch = t => `<span class="sw">${t.colors.map(c => `<i style="background:${c}"></i>`).join('')}<b style="background:${t.ball}"></b></span>`;
   const box = t => `<svg viewBox="0 0 60 60" class="theme-box" aria-hidden="true"><path d="M12 12h36" stroke="${t.colors[0]}" stroke-width="3"/><path d="M48 12v36" stroke="${t.colors[1]}" stroke-width="3"/><path d="M48 48H12" stroke="${t.colors[2]}" stroke-width="3"/><path d="M12 48V12" stroke="${t.colors[3]}" stroke-width="3"/><circle cx="30" cy="30" r="4" fill="${t.ball}"/></svg>`;
@@ -334,21 +364,21 @@ function settings() {
     $('[data-theme]').innerHTML = `<div class="head"><h3 class="sec-title" style="font-size:20px">Theme</h3><span class="lbl">Colours of the four sides and the ball, everywhere in the game</span></div>
       <div class="theme-grid">
         <div>${box(t)}</div>
-        <div><span class="lbl">Presets</span><div class="presets">${THEMES.map((p, i) => `<button class="preset ${same(p) ? 'on' : ''}" data-preset="${i}">${swatch(p)}<span>${p.name}</span></button>`).join('')}</div></div>
+        <div><span class="lbl">Presets</span><div class="presets">${allThemes().map((p, i) => `<button class="preset ${same(p) ? 'on' : ''}" data-preset="${i}">${swatch(p)}<span>${esc(p.name)}</span></button>`).join('')}</div><a class="lbl" href="#/shop" style="display:inline-block;margin-top:8px">More themes at the prize counter →</a></div>
         <div><span class="lbl">Custom</span><div class="pickers">${SIDE.map((n, i) => `<label class="picker"><input type="color" data-col="${i}" value="${t.colors[i]}"><span>${n}</span></label>`).join('')}<label class="picker"><input type="color" data-col="ball" value="${t.ball}"><span>Ball</span></label></div></div>
       </div>`;
   }
   renderTheme();
   $('[data-theme]').addEventListener('click', e => {
     const b = e.target.closest('[data-preset]'); if (!b) return;
-    const p = THEMES[+b.dataset.preset];
-    saveSettings({ theme: { colors: [...p.colors], ball: p.ball } }); applyTheme(); renderTheme();
+    const p = allThemes()[+b.dataset.preset];
+    saveSettings({ theme: { colors: [...p.colors], ball: p.ball } }); applyTheme(); renderTheme(); unlock('theme');
   });
   $('[data-theme]').addEventListener('input', e => {
     const k = e.target.dataset.col; if (k === undefined) return;
     const t = curTheme(), nt = { colors: [...t.colors], ball: t.ball };
     if (k === 'ball') nt.ball = e.target.value; else nt.colors[+k] = e.target.value;
-    saveSettings({ theme: nt }); applyTheme();
+    saveSettings({ theme: nt }); applyTheme(); unlock('theme');
     $('.theme-box').outerHTML = box(nt);
     $$('.preset').forEach(x => x.classList.remove('on'));
   });
@@ -428,7 +458,7 @@ function updates() {
 
 // ---------- menu background: vector tunnel, beat rings, reacts to whatever is playing
 const bg = $('#bg'), bgc = bg.getContext('2d');
-let bgOn = true, bgW = 0, bgH = 0, rings = [], lastB = -1, lastT = performance.now();
+let bgOn = true, bgW = 0, bgH = 0, rings = [], lastB = -1, lastT = performance.now(), attractEl = null, attract = null;
 function bgResize() { const d = Math.min(2, devicePixelRatio || 1); bgW = innerWidth; bgH = innerHeight; bg.width = bgW * d; bg.height = bgH * d; bgc.setTransform(d, 0, 0, d, 0, 0); }
 addEventListener('resize', bgResize); bgResize();
 function bgFrame(ts) {
@@ -440,6 +470,14 @@ function bgFrame(ts) {
   if (b !== lastB) { lastB = b; rings.push({ s: 0.2, a: ((b % 4) + 4) % 4 === 0 ? 0.9 : 0.45 }); }
   const X = bgW * (bgW > 860 ? 0.72 : 0.5), Y = bgH * 0.55, base = Math.min(bgW, bgH) * 0.09;
   bgc.fillStyle = '#05050a'; bgc.fillRect(0, 0, bgW, bgH);
+  if (attractEl && attractEl.isConnected) {
+    const r = attractEl.getBoundingClientRect();
+    if (r.width > 40) {
+      attract ||= new MiniScene(eqNow()); attract.eq = eqNow();
+      attract.draw(bgc, { X: r.left + r.width / 2, Y: r.top + r.height / 2, B: r.width * 0.3, W: bgW, H: bgH }, dt, bp !== null ? bp % 100000 : null, energy());
+      return;
+    }
+  }
   bgc.lineWidth = 1; bgc.strokeStyle = '#141a2a';
   const far = Math.hypot(bgW, bgH);
   bgc.beginPath(); for (const [cx, cy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { bgc.moveTo(X + cx * base, Y + cy * base); bgc.lineTo(X + cx * far, Y + cy * far); } bgc.stroke();
@@ -462,6 +500,16 @@ function bgFrame(ts) {
   bgc.globalAlpha = 0.35 + pulse * 0.2; bgc.fillStyle = '#fff6a0'; bgc.beginPath(); bgc.arc(X, Y, base * 0.1, 0, 7); bgc.fill(); bgc.globalAlpha = 1;
 }
 requestAnimationFrame(bgFrame);
+
+// ---------- CRT power-on (once per session), screen wipes, menu blips
+const wipeEl = Object.assign(document.createElement('div'), { id: 'wipe' }); document.body.appendChild(wipeEl);
+function wipe() { wipeEl.classList.remove('go'); void wipeEl.offsetWidth; wipeEl.classList.add('go'); }
+try { if (!sessionStorage.getItem('bsq.booted')) { sessionStorage.setItem('bsq.booted', '1'); const b = Object.assign(document.createElement('div'), { id: 'boot' }); document.body.appendChild(b); setTimeout(() => b.remove(), 1100); } } catch {}
+const UI_SEL = '.btn, .menu a, .ss-row, .ss-diff, .nav a, .preset, .shop-card, .tabs button, .seg button, .pchip, .cart';
+let hoverEl = null;
+document.addEventListener('pointerover', e => { const el = e.target.closest(UI_SEL); if (el && el !== hoverEl) { hoverEl = el; uiSound('hover'); } });
+document.addEventListener('click', e => { const el = e.target.closest(UI_SEL); if (el) uiSound(el.matches('[href="#/"], [data-x], [data-a=quit]') ? 'back' : 'click'); }, true);
+document.addEventListener('focusin', e => { if (e.target.matches?.('.menu a, .ss-row')) uiSound('hover'); });
 
 route();
 // warm the built-in track so the demo starts instantly

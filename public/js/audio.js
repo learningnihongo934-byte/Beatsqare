@@ -1,6 +1,7 @@
 // Web Audio: one context, a song clock locked to the output, song loading with an IndexedDB cache,
 // hit sounds, and the built-in synthesized demo track (so the game ships with no audio files).
 import { getSettings, idb, pickAudioFile } from './util.js';
+import { equipped } from './profile.js';
 
 export let ac = null;
 let master, songGain, sfxGain, analyser, freqData;
@@ -75,9 +76,10 @@ export class Player {
 
 // ---------- hit sounds: short pitched blip per side, noise tick on chords
 const LANE_HZ = [880, 740, 587, 659];
-export function hitSound(lane, kind = 'tap') {
+export function hitSound(lane, kind = 'tap', pack = equipped('sound')) {
   if (!ac || !getSettings().hitsounds) return;
-  const t = ac.currentTime;
+  const t = ac.currentTime, pk = pack.split('.')[1];
+  if (pk && pk !== 'blip') return packSound(pk, lane, kind, t);
   const o = ac.createOscillator(), g = ac.createGain();
   o.type = kind === 'end' ? 'triangle' : 'square';
   o.frequency.setValueAtTime(LANE_HZ[lane] * (kind === 'end' ? 2 : 1), t);
@@ -197,3 +199,42 @@ export function renderDemo() {
   })();
 }
 export function sectionOf(bar) { return bar < 4 ? 'intro' : bar < 12 ? 'A' : bar < 20 ? 'B' : bar < 24 ? 'break' : 'drop'; }
+
+// hit-sound packs from the shop
+let noiseBuf = null;
+function packSound(pk, lane, kind, t) {
+  const out = sfxGain, end = kind === 'end';
+  if (pk === 'clap') {
+    noiseBuf ||= (() => { const b = ac.createBuffer(1, ac.sampleRate * 0.3, ac.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; })();
+    for (const off of [0, 0.008, 0.016]) {
+      const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+      s.buffer = noiseBuf; f.type = 'bandpass'; f.frequency.value = 1200 + lane * 180; f.Q.value = 1.2;
+      g.gain.setValueAtTime(0.0001, t + off); g.gain.exponentialRampToValueAtTime(end ? 0.12 : 0.22, t + off + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + off + 0.09);
+      s.connect(f).connect(g).connect(out); s.start(t + off); s.stop(t + off + 0.12);
+    }
+    return;
+  }
+  const tone = (freq, type, dur, peak, when = 0) => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t + when);
+    g.gain.setValueAtTime(0.0001, t + when); g.gain.exponentialRampToValueAtTime(peak, t + when + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t + when + dur);
+    o.connect(g).connect(out); o.start(t + when); o.stop(t + when + dur + 0.02);
+    return o;
+  };
+  if (pk === 'wood') { const o = tone([720, 640, 560, 600][lane] * (end ? 1.5 : 1), 'sine', 0.06, 0.3); o.frequency.exponentialRampToValueAtTime(300, t + 0.05); return; }
+  if (pk === 'glass') { const f = [1760, 1568, 1319, 1480][lane] * (end ? 2 : 1); tone(f, 'sine', 0.35, 0.09); tone(f * 2.76, 'sine', 0.18, 0.03); return; }
+  if (pk === 'coin') { tone(988, 'square', 0.05, 0.07); tone(end ? 1976 : 1319 + lane * 60, 'square', 0.12, 0.07, 0.05); return; }
+}
+
+// menu blips (hover / click / back), very quiet
+let lastUi = 0;
+export function uiSound(kind = 'hover') {
+  if (!ac || ac.state !== 'running' || getSettings().uiSounds === false) return;
+  const now = performance.now(); if (kind === 'hover' && now - lastUi < 45) return; lastUi = now;
+  const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.type = kind === 'hover' ? 'triangle' : 'square';
+  const f0 = kind === 'hover' ? 1500 : kind === 'back' ? 660 : 990;
+  o.frequency.setValueAtTime(f0, t); if (kind === 'click') o.frequency.setValueAtTime(1480, t + 0.035);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(kind === 'hover' ? 0.025 : 0.05, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t + (kind === 'hover' ? 0.03 : 0.08));
+  o.connect(g).connect(sfxGain); o.start(t); o.stop(t + 0.1);
+}

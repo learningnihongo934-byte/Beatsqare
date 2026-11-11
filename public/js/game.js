@@ -1,6 +1,8 @@
 // Gameplay. Judging uses input timestamps mapped onto the audio output clock, so timing stays locked to the song.
 import { ctx, Player, loadSong, hitSound, missSound, energy } from './audio.js';
 import { points as timingPoints, beatAt } from './timing.js';
+import { drawBg, drawSide, drawTap, drawBall, spawnHit, stepParts } from './cosmetics.js';
+import { equipped, reward, levelOf, profile, TOKEN, fmtTok } from './profile.js';
 import { DIR, COLORS, BALL, BAD, OPP, adjacent, getSettings, approachTime, setBest, getBest, api, esc, fmtNum, icon, clamp, $ } from './util.js';
 
 // Tight windows (prototype: ±110 ms total, <50 ms = top grade)
@@ -14,6 +16,9 @@ export function gradeOf(acc, perfectAll) {
   return acc >= 95 ? 'S' : acc >= 90 ? 'A' : acc >= 80 ? 'B' : acc >= 70 ? 'C' : 'D';
 }
 export const chartKey = c => c.catalogId ? 'c:' + c.catalogId : (c.id || 'tmp');
+
+let current = null;
+export const abortGame = () => { if (current) current(); };
 
 export async function playChart(chart, opts = {}) {
   ctx();
@@ -40,7 +45,8 @@ export async function playChart(chart, opts = {}) {
     buffer = await loadSong(chart.song, p => { const el = root.querySelector('[data-pct]'); if (el) el.textContent = p >= 0 ? Math.round(p * 100) + '%' : Math.round(-p / 1024) + ' KB'; });
   } catch (e) {
     root.querySelector('[data-load] .panel').innerHTML = `<div class="lbl" style="color:var(--bad)">Could not load the song</div><p>${esc(e.message)}</p><button class="btn" data-x>Back</button>`;
-    return new Promise(res => root.querySelector('[data-x]').onclick = () => { cleanup(); res(null); });
+    const bail = () => { root.remove(); document.body.classList.remove('playing'); current = null; };
+    return new Promise(res => { current = () => { bail(); res({ result: null, action: 'nav' }); }; root.querySelector('[data-x]').onclick = () => { bail(); res({ result: null, action: 'quit' }); }; });
   }
   root.querySelector('[data-load]').remove();
 
@@ -155,16 +161,14 @@ export async function playChart(chart, opts = {}) {
   // ---------- fx state
   const ball = { x: 0, y: 0 }, trail = [];
   const sideFlash = [0, 0, 0, 0], sideCol = ['#fff', '#fff', '#fff', '#fff'];
-  const parts = []; let shake = 0, pop = null, rings = [], lastBeat = -1;
+  const parts = []; let shake = 0, pop = null, lastBeat = -1;
+  const bgState = {}, EQ = Object.fromEntries(['ball', 'trail', 'hit', 'note', 'frame', 'bg'].map(s => [s, equipped(s)]));
   function flashSide(L, col) { sideFlash[L] = 1; sideCol[L] = col; }
   function burst(L, j) {
     if (!S.particles) return;
-    const [dx, dy] = DIR[L], cnt = j === 'perfect' ? 18 : 10;
+    const [dx, dy] = DIR[L];
     const bx = X + dx * B + (dy ? ball.x * B * 0.7 : 0), by = Y + dy * B + (dx ? ball.y * B * 0.7 : 0);
-    for (let i = 0; i < cnt && parts.length < 400; i++) {
-      const a = Math.atan2(dy, dx) + (Math.random() - 0.5) * 2.2, sp = 120 + Math.random() * 420;
-      parts.push({ x: bx + (dy ? (Math.random() - 0.5) * B : 0), y: by + (dx ? (Math.random() - 0.5) * B : 0), vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1, c: Math.random() < 0.3 ? '#fff' : COLORS[L], s: 1 + Math.random() * 2.5 });
-    }
+    spawnHit(EQ.hit, parts, bx, by, Math.atan2(dy, dx), COLORS[L], j, B, !dx);
   }
 
   // ---------- flow
@@ -176,6 +180,7 @@ export async function playChart(chart, opts = {}) {
   if (localStorage.getItem('bsq.debug')) window.__bsqGame = { player, notes, R, pause, resume, get paused() { return paused; } };
   let resolveDone;
   const done = new Promise(r => (resolveDone = r));
+  current = () => finish(null, 'nav');
   player.play(beginPos, 1, 0.05);
 
   function pause() {
@@ -215,7 +220,7 @@ export async function playChart(chart, opts = {}) {
     removeEventListener('keydown', onKey); removeEventListener('keyup', onKeyUp); removeEventListener('resize', resize);
     removeEventListener('pointermove', onPMove); removeEventListener('pointerup', onPUp); removeEventListener('pointercancel', onPUp);
     removeEventListener('blur', onBlur); document.removeEventListener('visibilitychange', onVis);
-    cancelAnimationFrame(raf); root.remove(); document.body.classList.remove('playing');
+    cancelAnimationFrame(raf); root.remove(); document.body.classList.remove('playing'); current = null;
   }
 
   // ---------- main loop
@@ -251,7 +256,7 @@ export async function playChart(chart, opts = {}) {
     // ball: near-instant ease toward target (prototype k = 45)
     const [tx, ty] = target(), k = 1 - Math.exp(-dt * 45);
     ball.x += (tx - ball.x) * k; ball.y += (ty - ball.y) * k;
-    trail.unshift([ball.x, ball.y]); if (trail.length > 7) trail.pop();
+    trail.unshift([ball.x, ball.y]); if (trail.length > 18) trail.pop();
     draw(now - S.visualOffset / 1000, dt);
     // hud
     const sc = scoreNow();
@@ -277,7 +282,7 @@ export async function playChart(chart, opts = {}) {
     const [eLow, eMid, eHigh] = energy();
     const ba = beatAt(TP, now), beatLen = 60 / TP[ba.i].bpm, beatIdx = Math.floor(ba.beat), phase = ba.beat - beatIdx, beatKey = ba.i * 100000 + beatIdx;
     const pulse = now > 0 ? Math.exp(-phase * 5) : 0;
-    if (beatKey !== lastBeat && now > 0) { lastBeat = beatKey; rings.push({ s: 1, a: ((beatIdx % 4) + 4) % 4 === 0 ? 1 : 0.55 }); }
+    const newBeat = beatKey !== lastBeat && now > 0; if (newBeat) lastBeat = beatKey;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.globalCompositeOperation = 'source-over';
     g.fillStyle = '#05050a'; g.fillRect(0, 0, W, H);
@@ -285,21 +290,8 @@ export async function playChart(chart, opts = {}) {
     const sx = shake > 0.3 ? (Math.random() - 0.5) * shake : 0, sy = shake > 0.3 ? (Math.random() - 0.5) * shake : 0;
     g.translate(sx, sy);
     g.lineCap = 'square';
-    // background: tunnel rails + expanding beat rings (reacts to bass/mid)
-    const far = Math.hypot(W, H) / 2;
-    g.strokeStyle = '#1b2236'; g.lineWidth = 1; g.globalAlpha = 0.6 + eMid * 0.8;
-    g.beginPath();
-    for (const [cx, cy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { g.moveTo(X + cx * B, Y + cy * B); g.lineTo(X + cx * far, Y + cy * far); }
-    g.stroke(); g.globalAlpha = 1;
-    for (const r of rings) {
-      r.s += dt * 1.6 / beatLen * 0.5 * (1 + r.s * 0.6);
-      const s = B * r.s, a = r.a * Math.max(0, 1 - (r.s - 1) / 4) * (0.25 + eLow * 1.1);
-      if (a <= 0.01) continue;
-      g.strokeStyle = '#3a4c7a'; g.globalAlpha = Math.min(0.9, a); g.lineWidth = 1.5;
-      g.strokeRect(X - s, Y - s, s * 2, s * 2);
-    }
-    g.globalAlpha = 1;
-    rings = rings.filter(r => r.s < 5);
+    // background (equipped: tunnel / stars / grid floor / rain / void), reacts to bass/mid/high
+    drawBg(g, EQ.bg, { X, Y, B, W, H, dt, state: bgState, newBeat, bar: ((beatIdx % 4) + 4) % 4 === 0, beatLen, pulse, eLow, eMid, eHigh });
     // lane guides
     g.setLineDash([3, 9]); g.lineWidth = 1;
     for (let L = 0; L < 4; L++) {
@@ -316,9 +308,8 @@ export async function playChart(chart, opts = {}) {
     // box sides (pulse on the beat, flash on hit/miss, thicken when active)
     for (let L = 0; L < 4; L++) {
       const act = active(L);
-      sideLine(L, 0);
-      glowStroke(COLORS[L], 3 + pulse * 1.5 + (act ? 2 : 0), 0.75 + pulse * 0.25);
-      if (sideFlash[L] > 0.01) { sideLine(L, 6 * sideFlash[L]); glowStroke(sideCol[L], 3 + 7 * sideFlash[L], sideFlash[L]); sideFlash[L] *= Math.exp(-dt * 9); }
+      drawSide(g, EQ.frame, X, Y, B, L, COLORS[L], 3 + pulse * 1.5 + (act ? 2 : 0), 0.75 + pulse * 0.25, 0, now);
+      if (sideFlash[L] > 0.01) { drawSide(g, EQ.frame, X, Y, B, L, sideCol[L], 3 + 7 * sideFlash[L], sideFlash[L], 6 * sideFlash[L], now); sideFlash[L] *= Math.exp(-dt * 9); }
     }
     // corner ticks
     g.strokeStyle = '#e4ecf4'; g.lineWidth = 1.5; g.globalAlpha = 0.5;
@@ -361,13 +352,8 @@ export async function playChart(chart, opts = {}) {
         glowStroke(col, 2.5, missed ? 0.3 : 1);
         continue;
       }
-      const d = n.st === 1 ? B + 8 : dist(n.t), hw = B * 0.56, th = 7;
-      g.globalAlpha = missed ? 0.3 : 1;
-      g.fillStyle = col;
-      if (dx) g.fillRect(X + dx * d - th / 2, Y - hw, th, hw * 2); else g.fillRect(X - hw, Y + dy * d - th / 2, hw * 2, th);
-      g.fillStyle = '#ffffff'; g.globalAlpha = missed ? 0.15 : 0.7;
-      if (dx) g.fillRect(X + dx * d - 1, Y - hw + 2, 2, hw * 2 - 4); else g.fillRect(X - hw + 2, Y + dy * d - 1, hw * 2 - 4, 2);
-      g.globalAlpha = 1;
+      const d = n.st === 1 ? B + 8 : dist(n.t), hw = B * 0.56;
+      drawTap(g, EQ.note, X, Y, L, d, hw, col, missed ? 0.3 : 1);
       // chord bracket: dashed white link between the two notes' near ends
       if (n.chord && n.lane < n.chord.lane && n.st === 0 && n.chord.st === 0) {
         const m = n.chord, [mx, my] = DIR[m.lane];
@@ -378,23 +364,10 @@ export async function playChart(chart, opts = {}) {
         g.setLineDash([]); g.globalAlpha = 1;
       }
     }
-    // ball with short motion trail
+    // ball + trail (equipped skins), then hit particles
     const r = B * 0.085, reach = B - r - 6;
-    for (let i = trail.length - 1; i >= 1; i--) {
-      const [tx2, ty2] = trail[i]; g.globalAlpha = (1 - i / trail.length) * 0.25; g.fillStyle = BALL;
-      g.beginPath(); g.arc(X + tx2 * reach, Y + ty2 * reach, r * (1 - i / 10), 0, 7); g.fill();
-    }
-    g.globalAlpha = 0.3; g.beginPath(); g.arc(X + ball.x * reach, Y + ball.y * reach, r * 2.2, 0, 7); g.fill();
-    g.globalAlpha = 1; g.fillStyle = '#fffbe0'; g.beginPath(); g.arc(X + ball.x * reach, Y + ball.y * reach, r, 0, 7); g.fill();
-    // particles (additive)
-    g.globalCompositeOperation = 'lighter';
-    for (const p of parts) {
-      p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; p.life -= dt * 2.4;
-      if (p.life <= 0) continue;
-      g.globalAlpha = p.life; g.fillStyle = p.c; g.fillRect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s);
-    }
-    for (let i = parts.length - 1; i >= 0; i--) if (parts[i].life <= 0) parts.splice(i, 1);
-    g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+    drawBall(g, EQ.ball, EQ.trail, trail.map(([tx2, ty2]) => [X + tx2 * reach, Y + ty2 * reach]), r, now, S.particles ? parts : null);
+    stepParts(g, parts, dt);
     // judgement pop
     if (pop && pop.life > 0) {
       const txt = pop.j.toUpperCase(), s = 1 + (1 - pop.life) * 0.15 + (pop.life > 0.85 ? (pop.life - 0.85) * 2 : 0);
@@ -433,6 +406,8 @@ export async function playChart(chart, opts = {}) {
     const result = { score, acc: +acc.toFixed(2), grade, fc, maxCombo: R.maxCombo, ...R };
     const key = chartKey(chart), prevBest = getBest(key);
     const isBest = !opts.playtest && !opts.autoplay && startAt === 0 && setBest(key, result);
+    result.newBest = isBest;
+    const lv0 = levelOf(), rw = !opts.playtest && !opts.autoplay && startAt === 0 ? reward(result, chart) : null, lv1 = levelOf();
     const ov = document.createElement('div');
     ov.className = 'overlay'; ov.dataset.res = '1';
     const gcol = { SS: BALL, S: BALL, A: COLORS[0], B: COLORS[2], C: COLORS[3], D: BAD }[grade];
@@ -457,6 +432,15 @@ export async function playChart(chart, opts = {}) {
           ${opts.editable && !opts.playtest ? `<button class="btn" data-a="edit" style="--c:var(--left)">${icon('edit')}Edit chart</button>` : ''}
         </div>
       </div>
+      ${rw ? `<div class="res-side frame pad rewards" style="--c:var(--ball)">
+        <div class="head"><span class="sec-title" style="font-size:20px">Rewards</span><span class="lbl">Level ${lv1.level}</span></div>
+        <div class="rw-big">${TOKEN}<span class="num">+${fmtTok(rw.tokens)}</span><span class="muted">tokens</span><span class="num xp">+${fmtTok(rw.xp)}</span><span class="muted">XP</span></div>
+        <div class="xpbar big"><i style="width:${(lv1.into / lv1.need * 100).toFixed(1)}%"></i></div>
+        <div class="rw-lines">${rw.lines.map(([l, n]) => `<div><span>${esc(l)}</span><span class="num">+${n}</span></div>`).join('')}</div>
+        ${rw.levelUp ? `<div class="rw-up">Level up · ${rw.levelUp.from} → ${rw.levelUp.to}</div>` : ''}
+        ${rw.ach.map(a => `<div class="rw-ach"><span class="lbl">Achievement</span><b>${esc(a.name)}</b><span class="muted">+${a.reward}</span></div>`).join('')}
+        <div class="lbl" style="margin-top:10px">Balance ${TOKEN} ${fmtTok(profile().tokens)}</div>
+      </div>` : ''}
       <div class="res-side frame pad" style="--c:var(--right)">
         <div class="head"><span class="sec-title" style="font-size:20px">Leaderboard</span></div>
         <div class="board" data-board>${chart.catalogId && !opts.playtest && !opts.autoplay ? '<p class="muted">Sending score…</p>' : '<p class="muted">Publish this chart to the catalog to get an online leaderboard.</p>'}</div>

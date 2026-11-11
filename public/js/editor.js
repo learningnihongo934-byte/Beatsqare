@@ -5,6 +5,7 @@ import { peaksOf, analyze, detectBpm, detectSections, autoChartTimed } from './a
 import { points, snap as snapT, indexAt, gridLines, barBeat, beatAt, cleanTiming } from './timing.js';
 import { playChart } from './game.js';
 import { exportPack, downloadBytes } from './pack.js';
+import { unlock } from './profile.js';
 import { COLORS, BALL, LANE_NAMES, DIFFS, adjacent, idb, api, toast, esc, icon, fmtTime, clamp, downloadText, slug, getSettings, uploadFile } from './util.js';
 
 const analysisCache = new Map();
@@ -146,6 +147,7 @@ export async function openEditor(chartId, nav) {
       level: clamp(+$f('level').value || 5, 1, 15), updated: Date.now(),
     });
     await idb.putChart(chart);
+    if (chart.notes.length >= 50) unlock('chart_made');
     dirty = false; root.querySelector('[data-saved]').textContent = 'Saved';
   }
 
@@ -336,6 +338,7 @@ export async function openEditor(chartId, nav) {
     root.style.display = 'none'; stopLoop();
     let action = 'restart';
     while (action === 'restart') ({ action } = await playChart(chart, { start: pos, playtest: true }));
+    if (!root.isConnected) return;
     root.style.display = ''; startLoop(); resize();
   }
 
@@ -355,7 +358,7 @@ export async function openEditor(chartId, nav) {
       const S = getSettings();
       const { id } = await api('/charts', { method: 'POST', body: JSON.stringify({ ...JSON.parse(exportJson()), author: S.handle }) });
       chart.catalogId = id; await idb.putChart(chart);
-      toast('Published to the catalog');
+      toast('Published to the catalog'); unlock('publish');
     } catch (err) { toast('Publish failed: ' + err.message, true); }
   }
 

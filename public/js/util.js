@@ -62,7 +62,9 @@ export function setSongMeta(key, meta) {
 }
 
 // Modal: confirm or edit a song's title and artist (prefilled from the file's tags or name)
-export function askSongInfo(info, heading = 'Song info') {
+export function askSongInfo(info, heading = 'Song info', opts = {}) {
+  let art = opts.art || null, artChanged = false;
+  const url = () => art ? URL.createObjectURL(new Blob([art.data], { type: art.mime })) : '';
   return new Promise(res => {
     const ov = document.createElement('div');
     ov.className = 'overlay'; ov.style.position = 'fixed'; ov.style.zIndex = 40;
@@ -70,11 +72,22 @@ export function askSongInfo(info, heading = 'Song info') {
       <div class="head"><h2 class="sec-title" style="font-size:22px">${esc(heading)}</h2>${info.source ? `<span class="lbl">${esc(info.source)}</span>` : ''}</div>
       <div class="field"><span class="lbl">Title</span><input class="input" name="title" maxlength="80" required value="${esc(info.title || '')}"></div>
       <div class="field" style="margin-top:12px"><span class="lbl">Artist</span><input class="input" name="artist" maxlength="80" value="${esc(info.artist || '')}"></div>
+      <div class="field cover-field" style="margin-top:14px"><span class="lbl">Cover image</span>
+        <div class="cover-row"><div class="cover-thumb" data-thumb></div>
+          <div class="row"><label class="btn sm">Choose image<input type="file" accept="image/*" hidden data-img></label>
+          ${opts.fromFile ? '<button class="btn sm" type="button" data-fromfile>From song file</button>' : ''}
+          <button class="btn sm" type="button" data-noart>Remove</button></div></div></div>
       <div class="row" style="margin-top:18px"><button class="btn pri" style="--c:var(--down)">Save</button><button class="btn" type="button" data-x>Cancel</button></div></form>`;
     document.body.appendChild(ov);
-    const f = ov.querySelector('form');
+    const f = ov.querySelector('form'), thumb = ov.querySelector('[data-thumb]');
+    const showArt = () => { thumb.style.backgroundImage = art ? `url('${url()}')` : ''; thumb.textContent = art ? '' : 'None'; };
+    showArt();
+    ov.querySelector('[data-img]').onchange = async e => { const file = e.target.files[0]; if (!file) return; try { art = await squareImage(file); artChanged = true; showArt(); } catch { toast('Couldn’t read that image', true); } };
+    ov.querySelector('[data-noart]').onclick = () => { art = null; artChanged = true; showArt(); };
+    const ff = ov.querySelector('[data-fromfile]');
+    if (ff) ff.onclick = async () => { const pic = await opts.fromFile(); if (!pic) return toast('That song file has no cover image', true); art = await squareImage(new Blob([pic.data], { type: pic.mime })); artChanged = true; showArt(); };
     f.title.focus(); f.title.select();
-    f.onsubmit = e => { e.preventDefault(); ov.remove(); res({ title: f.title.value.trim() || 'Untitled', artist: f.artist.value.trim() }); };
+    f.onsubmit = e => { e.preventDefault(); ov.remove(); res({ title: f.title.value.trim() || 'Untitled', artist: f.artist.value.trim(), ...(artChanged || opts.art ? { art } : {}) }); };
     ov.querySelector('[data-x]').onclick = () => { ov.remove(); res(null); };
   });
 }
@@ -99,9 +112,17 @@ export function readTags(buf) {
       const len = ver === 4 ? ((b[p + 4] << 21) | (b[p + 5] << 14) | (b[p + 6] << 7) | b[p + 7]) : ((b[p + 4] << 24) | (b[p + 5] << 16) | (b[p + 6] << 8) | b[p + 7]);
       if (id === 'TIT2') out.title = text(p + 10, p + 10 + len);
       if (id === 'TPE1') out.artist = text(p + 10, p + 10 + len);
+      if (id === 'APIC' && !out.picture) {
+        const s0 = p + 10, enc = b[s0]; let q = s0 + 1;
+        let mime = ''; while (q < s0 + len && b[q]) mime += String.fromCharCode(b[q++]);
+        q += 2; // null + picture type
+        if (enc === 1 || enc === 2) { while (q + 1 < s0 + len && (b[q] || b[q + 1])) q += 2; q += 2; } else { while (q < s0 + len && b[q]) q++; q++; }
+        const data = b.slice(q, s0 + len);
+        if (data.length > 100) out.picture = { mime: /png/i.test(mime) ? 'image/png' : 'image/jpeg', data: data.buffer };
+      }
       p += 10 + len;
     }
-    return out.title || out.artist ? out : null;
+    return out.title || out.artist || out.picture ? out : null;
   } catch { return null; }
 }
 export const approachTime = (speed = settings.speed) => 2.3 - speed * 0.18; // speed 5 → 1.4 s (prototype feel)
@@ -140,6 +161,7 @@ export const idb = {
   delChart: id => tx('charts', 'readwrite', s => s.delete(id)),
   audio: k => tx('audio', 'readonly', s => s.get(k)),
   putAudio: (k, buf) => tx('audio', 'readwrite', s => s.put(buf, k)),
+  delAudio: k => tx('audio', 'readwrite', s => s.delete(k)),
 };
 
 // ---------- API
@@ -242,4 +264,30 @@ export function tidySongInfo({ title = '', artist = '' }) {
   const kagi = t.match(/^(.+?)\s*[「『]\s*(.+?)\s*[」』]\s*$/);
   if (kagi) { if (!a) a = kagi[1].trim(); t = kagi[2].trim(); }
   return { title: t || String(title).trim(), artist: a };
+}
+
+// ---------- cover art (per song, stored next to the audio cache as 'art:<songKey>')
+const artUrls = new Map();
+export async function artUrl(key) {
+  if (artUrls.has(key)) return artUrls.get(key);
+  const a = await idb.audio('art:' + key).catch(() => null);
+  const u = a && a.data ? URL.createObjectURL(new Blob([a.data], { type: a.mime || 'image/jpeg' })) : null;
+  artUrls.set(key, u);
+  return u;
+}
+export const getArt = key => idb.audio('art:' + key).catch(() => null);
+export async function setArt(key, art) {
+  const old = artUrls.get(key); if (old) URL.revokeObjectURL(old);
+  artUrls.delete(key);
+  if (art && art.data) await idb.putAudio('art:' + key, { mime: art.mime || 'image/jpeg', data: art.data });
+  else await idb.delAudio('art:' + key);
+}
+// centre-crop to a square and scale to at most 600 px, as JPEG
+export async function squareImage(blob) {
+  const bmp = await createImageBitmap(blob);
+  const s = Math.min(bmp.width, bmp.height), out = Math.min(600, s);
+  const c = document.createElement('canvas'); c.width = c.height = out;
+  c.getContext('2d').drawImage(bmp, (bmp.width - s) / 2, (bmp.height - s) / 2, s, s, 0, 0, out, out);
+  const jpg = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+  return { mime: 'image/jpeg', data: await jpg.arrayBuffer() };
 }

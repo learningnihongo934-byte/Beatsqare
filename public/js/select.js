@@ -1,6 +1,6 @@
 // Song select: song wheel on the right (one row per song), jacket + difficulty tabs + chart graph on the left.
 import { songKey } from './audio.js';
-import { songMeta, setSongMeta, askSongInfo } from './util.js';
+import { songMeta, setSongMeta, askSongInfo, artUrl, getArt, setArt, readTags } from './util.js';
 import { $, $$, esc, icon, toast, idb, getBest, fmtTime, fmtNum, clamp, uid, downloadText, slug, COLORS, DIFFS } from './util.js';
 import { DEMO_CHARTS, importChartFile } from './charts.js';
 import { chartKey } from './game.js';
@@ -37,12 +37,22 @@ async function songGroups() {
     g.best = g.charts.map(c => getBest(chartKey(c))).filter(Boolean).sort((a, b) => GRADE_RANK[b.grade] - GRADE_RANK[a.grade])[0] || null;
     g.maxLevel = Math.max(...g.charts.map(c => c.level || 0));
   }
+  // one-time backfill: songs already on this device get the cover embedded in their audio file
+  let tried; try { tried = new Set(JSON.parse(localStorage.getItem('bsq.artTried') || '[]')); } catch { tried = new Set(); }
+  for (const g of map.values()) {
+    if (g.song.source === 'builtin' || g.song.source === 'audius' || tried.has(g.key) || await artUrl(g.key)) continue;
+    tried.add(g.key);
+    const raw = await idb.audio(g.key).catch(() => null), pic = raw && readTags(raw)?.picture;
+    if (pic) await setArt(g.key, pic);
+  }
+  try { localStorage.setItem('bsq.artTried', JSON.stringify([...tried])); } catch {}
+  for (const g of map.values()) g.artUrl = (await artUrl(g.key)) || g.song.art || null;
   return [...map.values()];
 }
 
 // Generated jacket: concentric squares seeded by the title, big initials, the ball.
 function jacket(g) {
-  if (g.song.art) return `<div class="jk-art" style="background-image:url('${esc(g.song.art)}')"></div>`;
+  if (g.artUrl) return `<div class="jk-art" style="background-image:url('${esc(g.artUrl)}')"></div>`;
   const h = hash(g.title), rnd = i => ((h >>> (i * 3)) & 7) / 7;
   let sq = '';
   for (let i = 0; i < 7; i++) {
@@ -160,9 +170,13 @@ export async function songSelect(app, bar, nav, selId) {
     const a = e.target.closest('[data-a]')?.dataset.a, g = view[gi], c = g?.charts[ci];
     if (!a || !c) return;
     if (a === 'info') {
-      const r = await askSongInfo({ title: g.title, artist: g.artist }, 'Edit song info');
+      const cur = await getArt(g.key);
+      const r = await askSongInfo({ title: g.title, artist: g.artist }, 'Edit song info', {
+        art: cur, fromFile: async () => { const raw = await idb.audio(g.key).catch(() => null); return raw ? readTags(raw)?.picture || null : null; },
+      });
       if (!r) return;
-      setSongMeta(g.key, r);
+      setSongMeta(g.key, { title: r.title, artist: r.artist });
+      if ('art' in r) await setArt(g.key, r.art);
       for (const ch of g.charts) if (!ch.builtin) { const suffix = (ch.title.match(/ \((edit|my chart|auto)\)$/) || [''])[0]; await idb.putChart({ ...ch, title: r.title + suffix, artist: r.artist, updated: Date.now() }); }
       const key = g.key; groups = await songGroups(); filter(); gi = Math.max(0, view.findIndex(x => x.key === key)); renderList(); select(gi, false);
       toast('Song info saved');

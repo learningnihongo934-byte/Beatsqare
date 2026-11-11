@@ -7,6 +7,7 @@ Also in the game at `#/updates`.
 - **New:** Themes: Settings → Theme has presets (Vector, Sunset, Ocean, Phosphor, Amber, Sakura) and a colour picker for each side and the ball. It applies to the game, editor and menus.
 - **New:** Edit info on song select renames a song’s title and artist, even when the file or pack already named it.
 - **New:** Uploading a song reads its title and artist from the file’s tags (or a cleaned-up file name) and lets you edit them first.
+- **New:** Cover art: songs show their real cover on the jacket. It’s taken from the mp3’s embedded image on upload or import, or set with Edit info → Choose image / From song file. .bsq packs carry the cover too.
 - **New:** Timing points: a chart can change tempo. The beat pulse, menu rings, editor grid, snapping, bar numbers and metronome follow each section.
 - **New:** Detect finds tempo changes by itself: it scans the song in windows and splits it where the tempo really changes, not just where a section feels half-time.
 - **New:** Editor: + Tempo / − Tempo add or remove a section at the playhead. BPM and first beat edit the section under the playhead, and each change is marked in the ruler.

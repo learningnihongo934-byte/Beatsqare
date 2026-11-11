@@ -1,6 +1,6 @@
 // App shell: router + screens (title, song select, create, songs, catalog, settings) and the menu background.
 import { ctx, ac, loadSong, outAt, outNow, click, energy, applyVolume, rememberBuffer, decode, songKey, renderDemo } from './audio.js';
-import { songMeta, askSongInfo, readTags, tidySongInfo, THEMES, applyTheme } from './util.js';
+import { songMeta, askSongInfo, readTags, tidySongInfo, THEMES, applyTheme, setArt } from './util.js';
 import { $, $$, esc, icon, toast, api, idb, getSettings, saveSettings, getBest, fmtTime, fmtNum, clamp, uploadFile, downloadText, slug, COLORS, DIFFS, approachTime, uid } from './util.js';
 import { DEMO_CHARTS, newChart, saveCatalogChart, importChartFile } from './charts.js';
 import { playChart, chartKey } from './game.js';
@@ -144,7 +144,7 @@ async function handleFile(file) {
   const dash = name.match(/^(.+?)\s+[-–—]\s+(.+)$/);
   const fromName = tidySongInfo(dash ? { artist: dash[1], title: dash[2] } : { title: name });
   const tags = readTags(raw), fromTags = tags && tidySongInfo(tags);
-  const info = await askSongInfo({ title: fromTags?.title || fromName.title, artist: fromTags?.artist || fromName.artist, source: tags ? 'From the file’s tags' : 'From the file name' }, 'Name this song');
+  const info = await askSongInfo({ title: fromTags?.title || fromName.title, artist: fromTags?.artist || fromName.artist, source: tags ? 'From the file’s tags' : 'From the file name' }, 'Name this song', { art: tags?.picture || null, fromFile: async () => tags?.picture || null });
   if (!info) { msg.textContent = 'mp3 · mp4 · ogg · wav'; return; }
   const { title, artist } = info;
   let song;
@@ -157,6 +157,7 @@ async function handleFile(file) {
     song = { source: 'local', ref: uid(), credit: artist || name, license: 'Local file', mime: file.type };
   }
   await idb.putAudio(songKey(song), raw);
+  if (info.art) await setArt(songKey(song), info.art);
   rememberBuffer(song, buf);
   const c = await newChart(song, { title, artist, duration: buf.duration });
   nav('#/edit/' + c.id);

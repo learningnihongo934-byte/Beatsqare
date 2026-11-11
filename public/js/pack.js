@@ -1,19 +1,22 @@
 // .bsq — Beatsqare pack: one file with the song audio (mp3 / mp4 / wav / ogg) and every chart for it.
 // Layout: "BSQPACK1" (8 bytes) | uint32 LE header length | UTF-8 JSON header | raw audio bytes.
 // Header: { format: 'beatsqare-pack', v: 1, title, artist, audio: { name, mime, size }, charts: [chart, …] }
-import { idb, uid, pickAudioFile } from './util.js';
+import { idb, uid, pickAudioFile, getArt, setArt, readTags } from './util.js';
 import { songKey, renderDemo, songUrl } from './audio.js';
 
 const MAGIC = 'BSQPACK1';
 
 export const isPack = buf => buf.byteLength > 12 && new TextDecoder().decode(new Uint8Array(buf, 0, 8)) === MAGIC;
 
-export function encodePack(header, audio) {
-  const hj = new TextEncoder().encode(JSON.stringify({ format: 'beatsqare-pack', v: 1, ...header }));
-  const out = new Uint8Array(12 + hj.length + audio.byteLength);
+export function encodePack(header, audio, art) {
+  const h = { format: 'beatsqare-pack', v: 1, ...header };
+  if (art) h.art = { mime: art.mime, size: art.data.byteLength };
+  const hj = new TextEncoder().encode(JSON.stringify(h));
+  const out = new Uint8Array(12 + hj.length + audio.byteLength + (art ? art.data.byteLength : 0));
   out.set(new TextEncoder().encode(MAGIC), 0);
   new DataView(out.buffer).setUint32(8, hj.length, true);
   out.set(hj, 12); out.set(new Uint8Array(audio), 12 + hj.length);
+  if (art) out.set(new Uint8Array(art.data), 12 + hj.length + audio.byteLength);
   return out;
 }
 
@@ -22,7 +25,9 @@ export function decodePack(buf) {
   const n = new DataView(buf).getUint32(8, true);
   const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 12, n)));
   if (header.format !== 'beatsqare-pack' || !Array.isArray(header.charts)) throw new Error('bad pack header');
-  return { header, audio: buf.slice(12 + n) };
+  const a0 = 12 + n;
+  if (header.art && header.audio?.size) return { header, audio: buf.slice(a0, a0 + header.audio.size), art: { mime: header.art.mime, data: buf.slice(a0 + header.audio.size) } };
+  return { header, audio: buf.slice(a0) };
 }
 
 async function sha(buf) {
@@ -32,9 +37,11 @@ async function sha(buf) {
 
 // Import: audio goes into this browser's cache as a local song; each chart becomes a library chart.
 export async function importPack(buf) {
-  const { header, audio } = decodePack(buf);
+  const { header, audio, art } = decodePack(buf);
   const song = { source: 'local', ref: 'pack-' + await sha(audio), credit: header.artist || '', license: 'From a .bsq pack', file: header.audio?.name || '', mime: header.audio?.mime || 'audio/mpeg' };
   await idb.putAudio(songKey(song), audio);
+  const cover = art || readTags(audio)?.picture;
+  if (cover && !(await getArt(songKey(song)))) await setArt(songKey(song), cover);
   const existing = await idb.charts();
   const made = [];
   for (const [i, c] of header.charts.entries()) {
@@ -55,7 +62,8 @@ export async function exportPack(chart) {
   const charts = (all.length ? all : [chart]).map(c => ({ title: c.title, artist: c.artist, difficulty: c.difficulty, level: c.level, bpm: c.bpm, offset: c.offset, timing: c.timing, duration: c.duration, notes: c.notes }));
   if (!all.some(c => c.id === chart.id)) charts.unshift({ title: chart.title, artist: chart.artist, difficulty: chart.difficulty, level: chart.level, bpm: chart.bpm, offset: chart.offset, timing: chart.timing, duration: chart.duration, notes: chart.notes });
   const { bytes, mime, name } = await rawAudio(chart.song, chart.title);
-  return encodePack({ title: chart.title, artist: chart.artist || '', audio: { name, mime, size: bytes.byteLength }, charts }, bytes);
+  const art = await getArt(songKey(chart.song));
+  return encodePack({ title: chart.title, artist: chart.artist || '', audio: { name, mime, size: bytes.byteLength }, charts }, bytes, art && art.data ? art : null);
 }
 
 async function rawAudio(song, title) {

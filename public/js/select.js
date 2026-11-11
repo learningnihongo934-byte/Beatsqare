@@ -1,5 +1,6 @@
 // Song select: song wheel on the right (one row per song), jacket + difficulty tabs + chart graph on the left.
 import { songKey } from './audio.js';
+import { repairStuckVideo } from './util.js';
 import { songMeta, setSongMeta, askSongInfo, artUrl, getArt, setArt, readTags, hasVideo, setVideo, getSettings, saveSettings } from './util.js';
 import { $, $$, esc, icon, toast, idb, getBest, fmtTime, fmtNum, clamp, uid, downloadText, slug, COLORS, DIFFS } from './util.js';
 import { DEMO_CHARTS, importChartFile } from './charts.js';
@@ -46,7 +47,7 @@ async function songGroups() {
     if (pic) await setArt(g.key, pic);
   }
   try { localStorage.setItem('bsq.artTried', JSON.stringify([...tried])); } catch {}
-  for (const g of map.values()) { g.artUrl = (await artUrl(g.key)) || g.song.art || null; g.video = await hasVideo(g.key); }
+  for (const g of map.values()) { g.artUrl = (await artUrl(g.key)) || g.song.art || null; g.video = (await hasVideo(g.key)) || (await repairStuckVideo(g.key)); }
   return [...map.values()];
 }
 

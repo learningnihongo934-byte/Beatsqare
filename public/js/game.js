@@ -3,7 +3,7 @@ import { ctx, Player, loadSong, hitSound, missSound, energy } from './audio.js';
 import { points as timingPoints, beatAt } from './timing.js';
 import { drawBg, drawSide, drawTap, drawBall, spawnHit, stepParts } from './cosmetics.js';
 import { equipped, reward, levelOf, profile, TOKEN, fmtTok } from './profile.js';
-import { getVideo, saveSettings } from './util.js';
+import { getVideo, saveSettings, repairStuckVideo } from './util.js';
 import { songKey } from './audio.js';
 import { DIR, COLORS, BALL, BAD, OPP, adjacent, getSettings, approachTime, setBest, getBest, api, esc, fmtNum, icon, clamp, $ } from './util.js';
 
@@ -39,7 +39,7 @@ export async function playChart(chart, opts = {}) {
     <div class="overlay" data-load><div class="panel" style="text-align:center"><div class="lbl">${chart.song.source === 'builtin' ? 'Building track' : 'Loading song'}</div><div class="num" style="font-size:40px" data-pct>0%</div></div></div>`;
   document.body.appendChild(root);
   document.body.classList.add('playing');
-  const cv = root.querySelector('canvas'), g = cv.getContext('2d', { alpha: false });
+  const cv = root.querySelector('canvas'), g = cv.getContext('2d');
   const hudScore = root.querySelector('[data-score]'), hudAcc = root.querySelector('[data-acc]'), prog = root.querySelector('.prog i');
 
   let buffer;
@@ -55,11 +55,14 @@ export async function playChart(chart, opts = {}) {
   const player = new Player(buffer);
   // background video: loaded whenever the song has one, shown when Settings → Background video is on
   let vid = null, vidUrl = null, vStarting = false, lastSeek = 0;
+  await repairStuckVideo(songKey(chart.song)).catch(() => false);
   const vblob = await getVideo(songKey(chart.song)).catch(() => null);
   if (vblob) {
     vidUrl = URL.createObjectURL(vblob);
     vid = Object.assign(document.createElement('video'), { src: vidUrl, muted: true, playsInline: true, preload: 'auto', loop: false });
     vid.setAttribute('playsinline', ''); vid.setAttribute('muted', '');
+    // a real element behind a see-through canvas: the browser composites it natively (Firefox won't suspend it)
+    vid.className = 'bgvid'; vid.style.opacity = '0'; root.insertBefore(vid, cv);
     if (S.bgVideo) await new Promise(r => { vid.addEventListener('loadeddata', r, { once: true }); vid.addEventListener('error', r, { once: true }); setTimeout(r, 5000); });
     vid.addEventListener('error', () => { console.warn('background video failed to load', vid.error); });
   }
@@ -315,18 +318,22 @@ export async function playChart(chart, opts = {}) {
     const newBeat = beatKey !== lastBeat && now > 0; if (newBeat) lastBeat = beatKey;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.globalCompositeOperation = 'source-over';
-    g.fillStyle = '#05050a'; g.fillRect(0, 0, W, H);
+    const showVid = !!(S.bgVideo && vid && vid.readyState >= 2 && !vid.error);
+    if (vid) { const o = showVid ? '1' : '0'; if (vid.style.opacity !== o) vid.style.opacity = o; }
+    if (showVid) {
+      // the canvas stays fully clear behind the notes (bloom adds up alpha, so no dim layer here); the video dims itself
+      g.clearRect(0, 0, W, H);
+      const f = `brightness(${(1 - Math.min(0.9, (S.videoDim ?? 0.55) - eLow * 0.1)).toFixed(2)}) saturate(1.1)`;
+      if (vid.style.filter !== f) vid.style.filter = f;
+    }
+    else { g.fillStyle = '#05050a'; g.fillRect(0, 0, W, H); }
     shake *= Math.exp(-dt * 14);
     const sx = shake > 0.3 ? (Math.random() - 0.5) * shake : 0, sy = shake > 0.3 ? (Math.random() - 0.5) * shake : 0;
     g.translate(sx, sy);
     g.lineCap = 'square';
     // background (equipped: tunnel / stars / grid floor / rain / void), reacts to bass/mid/high
-    if (S.bgVideo && vid && vid.readyState >= 2 && !vid.error) {
-      // cover-fit the video, dimmed so the notes stay readable; it breathes a little with the bass
-      const vw = vid.videoWidth, vh = vid.videoHeight, sc = Math.max(W / vw, H / vh) * (1.02 + pulse * 0.01);
-      g.globalAlpha = 1; g.drawImage(vid, (W - vw * sc) / 2, (H - vh * sc) / 2, vw * sc, vh * sc);
-      g.fillStyle = `rgba(5,5,10,${Math.min(0.92, (S.videoDim ?? 0.55) - eLow * 0.08)})`; g.fillRect(0, 0, W, H);
-    } else drawBg(g, EQ.bg, { X, Y, B, W, H, dt, state: bgState, newBeat, bar: ((beatIdx % 4) + 4) % 4 === 0, beatLen, pulse, eLow, eMid, eHigh });
+    if (showVid) vid.style.transform = `scale(${(1.02 + pulse * 0.012).toFixed(4)})`; // the video breathes a little on the beat
+    else drawBg(g, EQ.bg, { X, Y, B, W, H, dt, state: bgState, newBeat, bar: ((beatIdx % 4) + 4) % 4 === 0, beatLen, pulse, eLow, eMid, eHigh });
     // lane guides
     g.setLineDash([3, 9]); g.lineWidth = 1;
     for (let L = 0; L < 4; L++) {

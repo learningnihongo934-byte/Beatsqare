@@ -43,7 +43,8 @@ export async function importPack(buf) {
   const song = { source: 'local', ref: 'pack-' + await sha(audio), credit: header.artist || '', license: 'From a .bsq pack', file: header.audio?.name || '', mime: header.audio?.mime || 'audio/mpeg' };
   await idb.putAudio(songKey(song), audio);
   const cover = art || readTags(audio)?.picture;
-  if (cover && !(await getArt(songKey(song)))) await setArt(songKey(song), cover);
+  if (art) await setArt(songKey(song), art); // the pack's own cover always wins (repairs older imports)
+  else if (cover && !(await getArt(songKey(song)))) await setArt(songKey(song), cover);
   if (video) await setVideo(songKey(song), video);
   const existing = await idb.charts();
   const made = [];

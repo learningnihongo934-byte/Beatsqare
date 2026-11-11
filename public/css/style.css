@@ -584,3 +584,5 @@ body.home-on #app{padding:0}
   .hm-dest.side.d-left i,.hm-dest.side.d-right i{display:none}
   .head .lbl{margin-left:0;width:100%}
 }
+
+.game .bgvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;transform-origin:center;transition:opacity .4s}

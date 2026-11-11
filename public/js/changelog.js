@@ -7,6 +7,8 @@ export const CHANGELOG = [
       ['up', 'Video stays in sync by nudging its speed instead of jumping; it only hard-seeks when it’s far off.'],
       ['up', 'Background video is on by default. Songs without a video are unaffected.'],
       ['new', 'The pause menu has a Background video on/off switch for songs that have one.'],
+      ['fix', 'The video is now a real element behind a see-through game canvas, so Firefox-based browsers play it too.'],
+      ['fix', 'Packs imported before video support had their video stuck inside the cover image. They’re repaired automatically, and re-importing a pack always restores its cover and video.'],
     ],
   },
   {

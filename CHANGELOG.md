@@ -8,6 +8,8 @@ Also in the game at `#/updates`.
 - **Improved:** Video stays in sync by nudging its speed instead of jumping; it only hard-seeks when it’s far off.
 - **Improved:** Background video is on by default. Songs without a video are unaffected.
 - **New:** The pause menu has a Background video on/off switch for songs that have one.
+- **Fixed:** The video is now a real element behind a see-through game canvas, so Firefox-based browsers play it too.
+- **Fixed:** Packs imported before video support had their video stuck inside the cover image. They’re repaired automatically, and re-importing a pack always restores its cover and video.
 
 ## v1.7 — The screen is the box (2026-11-11)
 

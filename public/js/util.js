@@ -305,3 +305,20 @@ export async function squareImage(blob) {
 export const getVideo = key => idb.audio('video:' + key).catch(() => null);
 export async function setVideo(key, blob) { if (blob) await idb.putAudio('video:' + key, blob); else await idb.delAudio('video:' + key); }
 export const hasVideo = async key => !!(await getVideo(key));
+
+// Packs imported by v1.6 (before video support) stored "cover + video" as one image. Split the video back out.
+export async function repairStuckVideo(key) {
+  if (await getVideo(key)) return false;
+  const art = await getArt(key);
+  if (!art || !art.data || art.data.byteLength < 1500000) return false;
+  const b = new Uint8Array(art.data), lim = Math.min(b.length - 8, 4000000);
+  for (let i = 104; i < lim; i++) {
+    if (b[i] === 0x66 && b[i + 1] === 0x74 && b[i + 2] === 0x79 && b[i + 3] === 0x70) { // 'ftyp' = start of an mp4
+      const start = i - 4;
+      await setVideo(key, new Blob([art.data.slice(start)], { type: 'video/mp4' }));
+      await setArt(key, { mime: art.mime || 'image/jpeg', data: art.data.slice(0, start) });
+      return true;
+    }
+  }
+  return false;
+}

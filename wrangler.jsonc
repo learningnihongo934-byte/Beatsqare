@@ -1,0 +1,17 @@
+{
+  // Beatsqare: static frontend in public/ + API Worker (src/worker.js). ./build.sh dev | deploy
+  "name": "beatsqare",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-10-01",
+  "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": ["/api/*"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "beatsqare", "database_id": "bd99326d-1301-47c3-90ae-88047e9fbe20", "migrations_dir": "migrations" }],
+  // Audio uploads. R2 needs a payment method to enable, so uploads live in KV (free, 25 MB/value).
+  // To switch to R2 later: add  "r2_buckets": [{ "binding": "AUDIO", "bucket_name": "beatsqare-audio" }]  — the Worker prefers it automatically.
+  "kv_namespaces": [{ "binding": "AUDIO_KV", "id": "966656bbc8b243b781c86bb6a31c2958" }],
+  // Specific host route: more specific than Rennko Cloud's *.rennko.tech/* wildcard, so this host stays here.
+  "routes": [
+    { "pattern": "beatsqare.rennko.tech", "custom_domain": true },
+    { "pattern": "beatsqare.rennko.tech/*", "zone_name": "rennko.tech" }
+  ],
+  "workers_dev": true
+}

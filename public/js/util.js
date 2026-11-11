@@ -134,3 +134,18 @@ export function downloadText(name, text) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 export const slug = s => String(s || 'chart').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'chart';
+
+// Ask for the audio file of a chart whose song only lives on the player's device (charts of your own files).
+export function pickAudioFile(song) {
+  return new Promise((res, rej) => {
+    const ov = document.createElement('div');
+    ov.className = 'overlay'; ov.style.position = 'fixed'; ov.style.zIndex = 40;
+    ov.innerHTML = `<div class="panel frame pad" style="--c:var(--down)">
+      <div class="head"><h2 class="sec-title" style="font-size:22px">Pick the song file</h2></div>
+      <p>This chart uses a song that stays on your device${song.file ? `: <b>${esc(song.file)}</b>` : ''}. Choose it once and it's kept in this browser. Nothing is uploaded.</p>
+      <div class="row" style="margin-top:16px"><label class="btn pri" style="--c:var(--down)">Choose audio file<input type="file" accept="audio/*,.mp3,.ogg,.wav,.m4a" hidden></label><button class="btn" data-x>Cancel</button></div></div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('input').onchange = e => { const f = e.target.files[0]; if (f) { ov.remove(); res(f); } };
+    ov.querySelector('[data-x]').onclick = () => { ov.remove(); rej(new Error('No song file picked.')); };
+  });
+}

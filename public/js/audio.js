@@ -1,6 +1,6 @@
 // Web Audio: one context, a song clock locked to the output, song loading with an IndexedDB cache,
 // hit sounds, and the built-in synthesized demo track (so the game ships with no audio files).
-import { getSettings, idb } from './util.js';
+import { getSettings, idb, pickAudioFile } from './util.js';
 
 export let ac = null;
 let master, songGain, sfxGain, analyser, freqData;
@@ -123,8 +123,8 @@ export async function loadSong(song, onProgress) {
     let raw = await idb.audio(key).catch(() => null);
     if (!raw) {
       const url = songUrl(song);
-      if (!url) throw new Error('This song is only on the device that made the chart.');
-      raw = await fetchWithProgress(url, onProgress);
+      if (url) raw = await fetchWithProgress(url, onProgress);
+      else raw = await (await pickAudioFile(song)).arrayBuffer();
       idb.putAudio(key, raw).catch(() => {});
     }
     buf = await decode(raw);

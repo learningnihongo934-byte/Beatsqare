@@ -150,16 +150,24 @@ export function autoChart(A, bpm, offset, difficulty = 'Normal', seed = 7) {
   const cfg = CFG[difficulty] || CFG.Normal, beat = 60 / bpm, slot = beat / cfg.div;
   const { flux, fr, t0, low, mid, high, rms } = A, n = flux.length;
   let rs = seed; const rnd = () => ((rs = (rs * 1664525 + 1013904223) >>> 0) / 4294967296);
-  // 1) peak-pick onsets with an adaptive threshold
+  // 1) peak-pick onsets with an adaptive threshold — on the full flux and per band (catches vocals / hats in dense mixes)
   const W = Math.round(fr * 0.5), on = [];
-  let sum = 0; const pre = new Float32Array(n + 1);
-  for (let i = 0; i < n; i++) pre[i + 1] = (sum += flux[i]);
-  for (let i = 3; i < n - 3; i++) {
-    const v = flux[i];
-    if (v < flux[i - 1] || v < flux[i + 1] || v < flux[i - 2] || v < flux[i + 2] || v < flux[i - 3] || v < flux[i + 3]) continue;
-    const a = Math.max(0, i - W), b = Math.min(n, i + W), mean = (pre[b] - pre[a]) / (b - a);
-    if (v > mean * 1.35 + 0.04) on.push({ i, t: t0 + i / fr, s: v - mean });
-  }
+  const prefix = a => { const p = new Float32Array(n + 1); let s = 0; for (let i = 0; i < n; i++) p[i + 1] = (s += a[i]); return p; };
+  const P = { all: prefix(flux), low: prefix(low), mid: prefix(mid), high: prefix(high) };
+  const localMean = (k, i) => { const a = Math.max(0, i - W), b = Math.min(n, i + W); return (P[k][b] - P[k][a]) / (b - a); };
+  const peaks = (arr, k, mul, add, weight) => {
+    for (let i = 3; i < n - 3; i++) {
+      const v = arr[i];
+      if (v < arr[i - 1] || v < arr[i + 1] || v < arr[i - 2] || v < arr[i + 2] || v < arr[i - 3] || v < arr[i + 3]) continue;
+      const mean = localMean(k, i);
+      if (v > mean * mul + add) on.push({ i, t: t0 + i / fr, s: (v - mean) * weight });
+    }
+  };
+  peaks(flux, 'all', 1.3, 0.03, 1);
+  if (difficulty !== 'Easy') { peaks(mid, 'mid', 1.5, 0.03, 0.8); peaks(low, 'low', 1.6, 0.04, 0.8); }
+  if (difficulty === 'Hard' || difficulty === 'Expert') peaks(high, 'high', 1.6, 0.03, 0.6);
+  // relative novelty of each band at frame i (band vs its own local level) decides the lane
+  const rel = i => [low[i] / (localMean('low', i) + 0.02), mid[i] / (localMean('mid', i) + 0.02), high[i] / (localMean('high', i) + 0.02)];
   // 2) quantise to the grid, keep the strongest onset per slot
   const slots = new Map();
   for (const o of on) {
@@ -184,10 +192,12 @@ export function autoChart(A, bpm, offset, difficulty = 'Normal', seed = 7) {
   for (let j = 0; j < kept.length; j++) {
     const p = kept[j], i = p.o.i;
     if (p.t < holdEnd + beat * 0.25) continue;
-    const L = low[i], M = mid[i], H = high[i];
-    let lane = L > M * 1.15 && L > H ? 2 : H > M * 1.1 && H > L ? 0 : (alt++ % 2 ? 1 : 3);
+    const [L, M, H] = rel(i);
+    let lane = L >= M && L >= H ? 2 : H >= M && H > L ? 0 : (alt++ % 2 ? 1 : 3);
     if (lane === last && ++repeat >= (difficulty === 'Easy' ? 3 : 2)) { lane = (lane + 1 + Math.floor(rnd() * 3)) % 4; repeat = 0; }
     else if (lane !== last) repeat = 0;
+    const prevT = j ? kept[j - 1].t : -1;
+    if (difficulty !== 'Expert' && last >= 0 && lane === (last + 2) % 4 && p.t - prevT < beat / 2 - 1e-3) lane = (last + (alt++ % 2 ? 1 : 3)) % 4;
     const next = kept[j + 1], gap = next ? next.t - p.t : beat * 4;
     const note = { t: +p.t.toFixed(4), lane };
     // sustain = rms between here and the next onset stays near the onset's level

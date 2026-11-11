@@ -3,7 +3,7 @@ import { ctx, Player, loadSong, hitSound, missSound, energy } from './audio.js';
 import { points as timingPoints, beatAt } from './timing.js';
 import { drawBg, drawSide, drawTap, drawBall, spawnHit, stepParts } from './cosmetics.js';
 import { equipped, reward, levelOf, profile, TOKEN, fmtTok } from './profile.js';
-import { getVideo, saveSettings, repairStuckVideo } from './util.js';
+import { getVideo, saveSettings, repairStuckVideo, setLiveBall, applyTheme } from './util.js';
 import { songKey } from './audio.js';
 import { DIR, COLORS, BALL, BAD, OPP, adjacent, getSettings, approachTime, setBest, getBest, api, esc, fmtNum, icon, clamp, $ } from './util.js';
 
@@ -65,6 +65,45 @@ export async function playChart(chart, opts = {}) {
     vid.className = 'bgvid'; vid.style.opacity = '0'; root.insertBefore(vid, cv);
     if (S.bgVideo) await new Promise(r => { vid.addEventListener('loadeddata', r, { once: true }); vid.addEventListener('error', r, { once: true }); setTimeout(r, 5000); });
     vid.addEventListener('error', () => { console.warn('background video failed to load', vid.error); });
+  }
+  // ---- Auto colours: each side takes the inverse of the video next to it (bright + saturated), the ball the inverse of the centre
+  const samp = Object.assign(document.createElement('canvas'), { width: 24, height: 14 }), sg = samp.getContext('2d', { willReadFrequently: true });
+  const hex2rgb = h => { const m = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(h); return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [255, 255, 255]; };
+  const aBase = COLORS.map(hex2rgb), aBaseBall = hex2rgb(BALL);
+  const aLive = aBase.map(c => [...c]), aLiveBall = [...aBaseBall], aTarget = aBase.map(c => [...c]), aTargetBall = [...aBaseBall];
+  let lastSample = 0, autoOn = false;
+  function hsl2rgb(h, s, l) { const k = n => (n + h * 12) % 12, a = s * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)); return [f(0) * 255, f(8) * 255, f(4) * 255]; }
+  function invertNeon([r, g2, b], fallback, L) {
+    const R = 255 - r, G = 255 - g2, Bv = 255 - b, mx = Math.max(R, G, Bv) / 255, mn = Math.min(R, G, Bv) / 255, d = mx - mn;
+    if (d < 0.08) { // grey: keep the theme hue, flip the brightness
+      const fb = fallback.map(v => v / 255), fmx = Math.max(...fb), fmn = Math.min(...fb), fd = fmx - fmn;
+      let h = 0; if (fd) h = fmx === fb[0] ? ((fb[1] - fb[2]) / fd) % 6 : fmx === fb[1] ? (fb[2] - fb[0]) / fd + 2 : (fb[0] - fb[1]) / fd + 4;
+      return hsl2rgb(((h / 6) + 1) % 1, 0.9, (r + g2 + b) / 765 > 0.5 ? 0.45 : L);
+    }
+    const nr = R / 255, ng = G / 255, nb = Bv / 255;
+    let h = mx === nr ? ((ng - nb) / d) % 6 : mx === ng ? (nb - nr) / d + 2 : (nr - ng) / d + 4;
+    return hsl2rgb(((h / 6) + 1) % 1, 0.95, L);
+  }
+  function sampleColours() {
+    // sample only the part of the video that's visible (it's cover-fitted to the screen)
+    const vw = vid.videoWidth, vh = vid.videoHeight, sc = Math.max(W / vw, H / vh), sw = Math.min(vw, W / sc), sh = Math.min(vh, H / sc);
+    sg.drawImage(vid, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, 24, 14);
+    const px = sg.getImageData(0, 0, 24, 14).data;
+    const avg = (x0, y0, x1, y1) => { let r = 0, g2 = 0, b = 0, n = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * 24 + x) * 4; r += px[i]; g2 += px[i + 1]; b += px[i + 2]; n++; } return [r / n, g2 / n, b / n]; };
+    const regions = [avg(6, 0, 18, 4), avg(19, 3, 24, 11), avg(6, 10, 18, 14), avg(0, 3, 5, 11)];
+    regions.forEach((c, i) => (aTarget[i] = invertNeon(c, aBase[i], 0.62)));
+    const tb = invertNeon(avg(9, 5, 15, 9), aBaseBall, 0.82); aTargetBall.splice(0, 3, ...tb);
+  }
+  function updateColours(dt, showVid) {
+    const want = !!(S.autoColor && showVid);
+    if (want) { const ms = performance.now(); if (ms - lastSample > 200) { lastSample = ms; try { sampleColours(); } catch {} } }
+    else if (autoOn) { aBase.forEach((c, i) => (aTarget[i] = [...c])); aTargetBall.splice(0, 3, ...aBaseBall); }
+    autoOn = want || aLive.some((c, i) => c.some((v, j) => Math.abs(v - aBase[i][j]) > 1));
+    if (!autoOn) return;
+    const k = 1 - Math.exp(-dt * 4);
+    for (let i = 0; i < 4; i++) { for (let j = 0; j < 3; j++) aLive[i][j] += (aTarget[i][j] - aLive[i][j]) * k; COLORS[i] = `rgb(${aLive[i].map(v => v | 0).join(',')})`; }
+    for (let j = 0; j < 3; j++) aLiveBall[j] += (aTargetBall[j] - aLiveBall[j]) * k;
+    setLiveBall(`rgb(${aLiveBall.map(v => v | 0).join(',')})`);
   }
   function syncVideo(t) {
     if (!vid || vid.error) return;
@@ -222,12 +261,13 @@ export async function playChart(chart, opts = {}) {
       <div class="head"><h2 class="sec-title">Paused</h2><span class="lbl">${esc(chart.title)}</span></div>
       <div class="menu-list">
         <button class="btn" data-a="resume">Resume <span class="keycap">Esc</span></button>
-        ${vid ? `<button class="btn ${S.bgVideo ? 'on' : ''}" data-a="video" style="--c:var(--right)">Background video: ${S.bgVideo ? 'on' : 'off'}</button>` : ''}
+        ${vid ? `<button class="btn ${S.bgVideo ? 'on' : ''}" data-a="video" style="--c:var(--right)">Background video: ${S.bgVideo ? 'on' : 'off'}</button>
+        <button class="btn ${S.autoColor ? 'on' : ''}" data-a="autocol" style="--c:var(--down)">Auto colours from video: ${S.autoColor ? 'on' : 'off'}</button>` : ''}
         <button class="btn" data-a="restart" style="--c:var(--left)">Restart</button>
         <button class="btn" data-a="quit" style="--c:var(--right)">${opts.playtest ? 'Back to editor' : 'Quit'}</button>
       </div></div>`;
     root.appendChild(ov);
-    ov.onclick = e => { const a = e.target.closest('[data-a]')?.dataset.a; if (a === 'resume') resume(); if (a === 'video') { saveSettings({ bgVideo: !S.bgVideo }); const b = e.target.closest('[data-a]'); b.textContent = 'Background video: ' + (S.bgVideo ? 'on' : 'off'); b.classList.toggle('on', S.bgVideo); } if (a === 'restart') { finish(null, 'restart'); } if (a === 'quit') finish(null, 'quit'); };
+    ov.onclick = e => { const a = e.target.closest('[data-a]')?.dataset.a; if (a === 'resume') resume(); if (a === 'autocol') { saveSettings({ autoColor: !S.autoColor }); const b = e.target.closest('[data-a]'); b.textContent = 'Auto colours from video: ' + (S.autoColor ? 'on' : 'off'); b.classList.toggle('on', S.autoColor); } if (a === 'video') { saveSettings({ bgVideo: !S.bgVideo }); const b = e.target.closest('[data-a]'); b.textContent = 'Background video: ' + (S.bgVideo ? 'on' : 'off'); b.classList.toggle('on', S.bgVideo); } if (a === 'restart') { finish(null, 'restart'); } if (a === 'quit') finish(null, 'quit'); };
     ov.querySelector('[data-a=resume]').focus();
   }
   function resume() {
@@ -253,6 +293,7 @@ export async function playChart(chart, opts = {}) {
     removeEventListener('blur', onBlur); document.removeEventListener('visibilitychange', onVis);
     cancelAnimationFrame(raf); root.remove(); document.body.classList.remove('playing'); current = null;
     if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); } if (vidUrl) URL.revokeObjectURL(vidUrl);
+    applyTheme(); // undo auto colours
   }
 
   // ---------- main loop
@@ -332,6 +373,7 @@ export async function playChart(chart, opts = {}) {
     g.translate(sx, sy);
     g.lineCap = 'square';
     // background (equipped: tunnel / stars / grid floor / rain / void), reacts to bass/mid/high
+    updateColours(dt, showVid);
     if (showVid) vid.style.transform = `scale(${(1.02 + pulse * 0.012).toFixed(4)})`; // the video breathes a little on the beat
     else drawBg(g, EQ.bg, { X, Y, B, W, H, dt, state: bgState, newBeat, bar: ((beatIdx % 4) + 4) % 4 === 0, beatLen, pulse, eLow, eMid, eHigh });
     // lane guides

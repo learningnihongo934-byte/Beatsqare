@@ -32,7 +32,7 @@ const DEFAULTS = {
   visualOffset: 0,     // ms; positive = draw notes later
   speed: 5,            // 1..10 → approach time
   volume: 0.85, hitVolume: 0.5, hitsounds: true,
-  crt: true, shake: true, particles: true, menuMusic: true, uiSounds: true, bgVideo: true, videoDim: 0.55,
+  crt: true, shake: true, particles: true, menuMusic: true, uiSounds: true, bgVideo: true, videoDim: 0.55, autoColor: true,
   handle: '',
   theme: null, // { colors: [up, right, down, left], ball }
 };
@@ -46,6 +46,7 @@ export function saveSettings(patch) {
   try { localStorage.setItem('bsq.settings', JSON.stringify(settings)); } catch {}
   document.body.classList.toggle('no-crt', !settings.crt);
 }
+export function setLiveBall(c) { BALL = c; } // auto colours change the ball mid-game
 export function applyTheme(theme = settings.theme) {
   const t = theme && theme.colors && theme.colors.length === 4 ? theme : THEMES[0];
   t.colors.forEach((c, i) => (COLORS[i] = c));

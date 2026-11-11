@@ -1,6 +1,14 @@
 // Update log, newest first. Shown at #/updates; the title screen flags a version you haven't seen.
 export const CHANGELOG = [
   {
+    v: '1.9', date: '2026-11-11', title: 'Auto colours',
+    items: [
+      ['new', 'Auto colours: during a background video, each side of the box takes the inverse of the video behind it (bright and saturated), and the ball takes the inverse of the centre. Colours glide instead of flickering, and your theme comes back after the song.'],
+      ['new', 'Turn it on or off with the Auto · video tile in Settings → Theme, or from the pause menu.'],
+      ['up', 'Song select actions fit on one row.'],
+    ],
+  },
+  {
     v: '1.8', date: '2026-11-11', title: 'Background video fixed',
     items: [
       ['fix', 'Background videos now actually play. The video used to re-seek every frame while starting and could stay stuck, so it never showed.'],

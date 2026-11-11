@@ -149,7 +149,7 @@ export async function songSelect(app, bar, nav, selId) {
         <button class="btn pri ss-play" data-a="play">${icon('play')}Play <span class="keycap">Enter</span></button>
         <button class="btn" data-a="auto" style="--c:var(--ball)">${icon('play')}Autoplay</button>
         ${g.video ? `<button class="btn ${getSettings().bgVideo ? 'on' : ''}" data-a="vid" style="--c:var(--right)" title="Play the song's video behind the notes">Video ${getSettings().bgVideo ? 'on' : 'off'}</button>` : ''}
-        ${own ? `<a class="btn" href="#/edit/${encodeURIComponent(c.id)}" style="--c:var(--left)">${icon('edit')}Edit</a>` : `<button class="btn" data-a="copy" style="--c:var(--left)">${icon('edit')}Edit a copy</button>`}
+        ${own ? `<a class="btn" href="#/edit/${encodeURIComponent(c.id)}" style="--c:var(--left)">${icon('edit')}Edit</a>` : `<button class="btn" data-a="copy" style="--c:var(--left)" title="Edit a copy of this chart">${icon('edit')}Edit</button>`}
         <button class="btn" data-a="pack" title="Song + every chart for it in one file">${icon('down')}.bsq</button>
         ${!c.builtin ? `<button class="btn" data-a="del" style="--c:var(--bad)" aria-label="Remove chart">${icon('x')}</button>` : ''}
       </div>`;

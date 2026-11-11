@@ -2,6 +2,12 @@
 
 Also in the game at `#/updates`.
 
+## v1.9 — Auto colours (2026-11-11)
+
+- **New:** Auto colours: during a background video, each side of the box takes the inverse of the video behind it (bright and saturated), and the ball takes the inverse of the centre. Colours glide instead of flickering, and your theme comes back after the song.
+- **New:** Turn it on or off with the Auto · video tile in Settings → Theme, or from the pause menu.
+- **Improved:** Song select actions fit on one row.
+
 ## v1.8 — Background video fixed (2026-11-11)
 
 - **Fixed:** Background videos now actually play. The video used to re-seek every frame while starting and could stay stuck, so it never showed.

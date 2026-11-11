@@ -458,12 +458,13 @@ function settings() {
     $('[data-theme]').innerHTML = `<div class="head"><h3 class="sec-title" style="font-size:20px">Theme</h3><span class="lbl">Colours of the four sides and the ball, everywhere in the game</span></div>
       <div class="theme-grid">
         <div>${box(t)}</div>
-        <div><span class="lbl">Presets</span><div class="presets">${allThemes().map((p, i) => `<button class="preset ${same(p) ? 'on' : ''}" data-preset="${i}">${swatch(p)}<span>${esc(p.name)}</span></button>`).join('')}</div><a class="lbl" href="#/shop" style="display:inline-block;margin-top:8px">More themes at the prize counter →</a></div>
+        <div><span class="lbl">Presets</span><div class="presets"><button class="preset auto ${S.autoColor ? 'on' : ''}" data-auto title="During background videos, each side takes the inverse of the video behind it"><span class="sw auto-sw"><i></i><i></i><i></i><i></i><b></b></span><span>Auto · video</span></button>${allThemes().map((p, i) => `<button class="preset ${same(p) ? 'on' : ''}" data-preset="${i}">${swatch(p)}<span>${esc(p.name)}</span></button>`).join('')}</div><a class="lbl" href="#/shop" style="display:inline-block;margin-top:8px">More themes at the prize counter →</a></div>
         <div><span class="lbl">Custom</span><div class="pickers">${SIDE.map((n, i) => `<label class="picker"><input type="color" data-col="${i}" value="${t.colors[i]}"><span>${n}</span></label>`).join('')}<label class="picker"><input type="color" data-col="ball" value="${t.ball}"><span>Ball</span></label></div></div>
       </div>`;
   }
   renderTheme();
   $('[data-theme]').addEventListener('click', e => {
+    if (e.target.closest('[data-auto]')) { saveSettings({ autoColor: !S.autoColor }); renderTheme(); toast(S.autoColor ? 'Auto colours on: sides invert the background video' : 'Auto colours off'); return; }
     const b = e.target.closest('[data-preset]'); if (!b) return;
     const p = allThemes()[+b.dataset.preset];
     saveSettings({ theme: { colors: [...p.colors], ball: p.ball } }); applyTheme(); renderTheme(); unlock('theme');

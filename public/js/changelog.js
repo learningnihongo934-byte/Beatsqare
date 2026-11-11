@@ -1,6 +1,19 @@
 // Update log, newest first. Shown at #/updates; the title screen flags a version you haven't seen.
 export const CHANGELOG = [
   {
+    v: '1.5', date: '2026-11-11', title: 'Tempo changes, themes and song names',
+    items: [
+      ['new', 'Themes: Settings → Theme has presets (Vector, Sunset, Ocean, Phosphor, Amber, Sakura) and a colour picker for each side and the ball. It applies to the game, editor and menus.'],
+      ['new', 'Edit info on song select renames a song’s title and artist, even when the file or pack already named it.'],
+      ['new', 'Uploading a song reads its title and artist from the file’s tags (or a cleaned-up file name) and lets you edit them first.'],
+      ['new', 'Timing points: a chart can change tempo. The beat pulse, menu rings, editor grid, snapping, bar numbers and metronome follow each section.'],
+      ['new', 'Detect finds tempo changes by itself: it scans the song in windows and splits it where the tempo really changes, not just where a section feels half-time.'],
+      ['new', 'Editor: + Tempo / − Tempo add or remove a section at the playhead. BPM and first beat edit the section under the playhead, and each change is marked in the ruler.'],
+      ['up', 'Auto-chart charts each tempo section on its own grid.'],
+      ['up', 'Timing points are kept in .bsq packs, JSON export and published charts. Song select shows a BPM range like 105.5–135.'],
+    ],
+  },
+  {
     v: '1.4', date: '2026-11-10', title: 'Sharper BPM detection',
     items: [
       ['up', 'BPM detection scores every tempo from 70 to 200 on both beats and half-beats. That fixes half-time and triplet mix-ups like 80 vs 120 and 106 vs 160. It was checked against six real songs.'],

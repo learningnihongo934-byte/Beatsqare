@@ -100,6 +100,7 @@ async function publishChart(req, env) {
     v: 1, title: clean(c.title) || 'Untitled', artist: clean(c.artist), author: handleOf(c.author),
     difficulty: DIFFS.includes(c.difficulty) ? c.difficulty : 'Normal', level: Math.max(1, Math.min(15, c.level | 0 || 5)),
     bpm: +c.bpm || 120, offset: +c.offset || 0, duration: +c.duration || 0,
+    ...(Array.isArray(c.timing) && c.timing.length > 1 ? { timing: c.timing.filter(p => Number.isFinite(+p.t) && +p.bpm >= 20 && +p.bpm <= 400).slice(0, 64).map(p => ({ t: +(+p.t).toFixed(4), bpm: +(+p.bpm).toFixed(3) })) } : {}),
     song: { source: song.source, ref: String(song.ref), license: clean(song.license, 120), credit: clean(song.credit, 160), link: clean(song.link, 300), art: clean(song.art, 300) },
     notes,
   };

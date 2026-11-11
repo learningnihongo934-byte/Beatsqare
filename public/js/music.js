@@ -1,8 +1,9 @@
 // Menu music: one channel shared by the home screen (random owned song) and song-select previews.
 // Routed through the song bus so the background visualiser reacts, and exposes the beat for the rings.
 import { ctx, ac, loadSong, songInput, songKey } from './audio.js';
-import { idb, getSettings, saveSettings } from './util.js';
+import { idb, getSettings, saveSettings, songMeta } from './util.js';
 import { DEMO_CHARTS } from './charts.js';
+import { points as timingPoints, beatAt } from './timing.js';
 
 let cur = null, token = 0;
 const listeners = new Set();
@@ -17,8 +18,9 @@ export async function ownedSongs() {
   for (const c of charts) {
     const k = songKey(c.song);
     if (seen.has(k)) continue;
-    seen.set(k, { key: k, song: c.song, title: c.title.replace(/ \((edit|my chart|auto)\)$/, ''), artist: c.artist || c.song.credit || '', bpm: c.bpm, offset: c.offset || 0 });
+    seen.set(k, { key: k, song: c.song, title: c.title.replace(/ \((edit|my chart|auto)\)$/, ''), artist: c.artist || c.song.credit || '', bpm: c.bpm, offset: c.offset || 0, timing: c.timing });
   }
+  for (const s of seen.values()) { const m = songMeta(s.key); if (m) { s.title = m.title || s.title; s.artist = m.artist ?? s.artist; } }
   const out = [];
   for (const s of seen.values()) if (s.song.source === 'builtin' || await idb.audio(s.key).catch(() => null)) out.push(s);
   return out;
@@ -88,5 +90,6 @@ export const musicPos = () => (cur && ac ? ac.currentTime - cur.startCtx + cur.s
 export function beatPos() {
   if (!cur || !cur.info.bpm || !ac) return null;
   const pos = ac.currentTime - cur.startCtx + cur.startPos;
-  return (pos - (cur.info.offset || 0)) / (60 / cur.info.bpm);
+  const { i, beat } = beatAt(timingPoints(cur.info), pos);
+  return i * 100000 + beat;
 }

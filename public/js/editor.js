@@ -1,7 +1,8 @@
 // Level editor: waveform timeline, beat grid with snapping, 4 lanes, holds, chords, pierce notes,
 // selection + clipboard, undo/redo, slowed playback, BPM detection, auto-chart, playtest, JSON in/out, publish.
 import { ctx, Player, loadSong, hitSound, click, ac, songKey } from './audio.js';
-import { peaksOf, analyze, detectBpm, autoChart } from './analysis.js';
+import { peaksOf, analyze, detectBpm, detectSections, autoChartTimed } from './analysis.js';
+import { points, snap as snapT, indexAt, gridLines, barBeat, beatAt, cleanTiming } from './timing.js';
 import { playChart } from './game.js';
 import { exportPack, downloadBytes } from './pack.js';
 import { COLORS, BALL, LANE_NAMES, DIFFS, adjacent, idb, api, toast, esc, icon, fmtTime, clamp, downloadText, slug, getSettings, uploadFile } from './util.js';
@@ -38,6 +39,9 @@ export async function openEditor(chartId, nav) {
       <span class="lbl">BPM</span><input class="input bpm" data-f="bpm" type="number" step="0.01" min="40" max="300" value="${chart.bpm}">
       <button class="btn sm" data-a="detect" title="Detect BPM and first beat">Detect</button>
       <button class="btn sm" data-a="tap" title="Tap tempo (T)">Tap</button>
+      <button class="btn sm" data-a="tpadd" style="--c:var(--ball)" title="Start a new tempo section at the playhead">+ Tempo</button>
+      <button class="btn sm" data-a="tpdel" style="--c:var(--ball)" title="Remove the tempo section under the playhead">− Tempo</button>
+      <span class="lbl" data-tp></span>
       <span class="sep"></span>
       <span class="lbl">Snap</span>
       <div class="seg" data-seg="snap" style="--c:var(--left)"><button data-v="1">1/1</button><button data-v="2">1/2</button><button data-v="4" class="on">1/4</button><button data-v="8">1/8</button></div>
@@ -59,7 +63,7 @@ export async function openEditor(chartId, nav) {
           <div class="field" style="flex:1"><span class="lbl">Difficulty</span><select class="input" data-f="difficulty">${DIFFS.map(d => `<option ${d === chart.difficulty ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
           <div class="field" style="width:70px"><span class="lbl">Level</span><input class="input" data-f="level" type="number" min="1" max="15" value="${chart.level || 5}"></div>
         </div>
-        <div class="field"><span class="lbl">First beat (ms)</span><input class="input" data-f="offset" type="number" step="1" value="${Math.round((chart.offset || 0) * 1000)}"></div>
+        <div class="field"><span class="lbl">Section first beat (ms)</span><input class="input" data-f="offset" type="number" step="1" value="${Math.round((chart.offset || 0) * 1000)}"></div>
         <label class="row" style="font-size:12px"><input type="checkbox" data-f="metro"> Metronome</label>
         <label class="row" style="font-size:12px"><input type="checkbox" data-f="ticks" checked> Note ticks</label>
         <div><span class="lbl">Song</span><p style="margin:4px 0 0;font-size:12px">${esc(chart.song.credit || chart.artist || '')}<br><span class="muted">${esc(chart.song.license || '')}</span></p></div>
@@ -96,9 +100,28 @@ export async function openEditor(chartId, nav) {
   const laneH = () => Math.max(36, (H - laneTop() - 6) / 4);
   const xOf = t => (t - viewStart) * pps;
   const tOf = x => x / pps + viewStart;
-  const beat = () => 60 / chart.bpm;
-  const sub = () => beat() / snapDiv;
-  const snap = t => chart.offset + Math.round((t - chart.offset) / sub()) * sub();
+  const TP = () => points(chart);
+  const subAt = t => { const tp = TP(); return 60 / tp[indexAt(tp, t)].bpm / snapDiv; };
+  const sub = () => subAt(pos);
+  const snap = t => snapT(TP(), t, snapDiv);
+  // timing points: chart.timing holds 2+ sections; one section lives in chart.bpm / chart.offset
+  function setTiming(tp) {
+    tp = tp.map(p => ({ t: +p.t, bpm: clamp(+p.bpm || 120, 40, 300) })).sort((a, b) => a.t - b.t);
+    if (tp.length > 1) chart.timing = cleanTiming(tp); else delete chart.timing;
+    chart.bpm = tp[0].bpm;
+    const per = 60 / tp[0].bpm; chart.offset = +(tp[0].t - Math.floor(tp[0].t / per) * per).toFixed(4);
+    if (!chart.timing) chart.offset = +tp[0].t.toFixed(4);
+    syncTimingFields(true); markDirty();
+  }
+  let shownTp = -1;
+  function syncTimingFields(force) {
+    const tp = TP(), i = indexAt(tp, pos);
+    if (!force && i === shownTp) return;
+    shownTp = i;
+    if (document.activeElement !== $f('bpm')) $f('bpm').value = +tp[i].bpm.toFixed(3);
+    if (document.activeElement !== $f('offset')) $f('offset').value = Math.round(tp[i].t * 1000);
+    root.querySelector('[data-tp]').textContent = tp.length > 1 ? `Tempo ${i + 1}/${tp.length}` : '';
+  }
   const laneAt = y => y < laneTop() ? -1 : clamp(Math.floor((y - laneTop()) / laneH()), 0, 3);
   root.querySelector('[data-loading]').remove();
 
@@ -177,13 +200,13 @@ export async function openEditor(chartId, nav) {
     else if (drag.kind === 'len') { const end = snap(tOf(x)); drag.n.len = Math.max(0, end - drag.n.t); }
     else if (drag.kind === 'box') { drag.x1 = x; drag.y1 = y; }
     else if (drag.kind === 'move') {
-      const dt = Math.round((tOf(x) - tOf(drag.x0)) / sub()) * sub(), dL = laneAt(y) - drag.L0;
+      const st = subAt(drag.orig[0][1]), dt = Math.round((tOf(x) - tOf(drag.x0)) / st) * st, dL = laneAt(y) - drag.L0;
       for (const [n, t0, l0] of drag.orig) { n.t = Math.max(0, t0 + dt); n.lane = ((l0 + dL) % 4 + 4) % 4; }
     }
   });
   wrap.addEventListener('pointerup', () => {
     if (!drag) return;
-    if (drag.kind === 'len') { if (drag.n.len < sub() * 0.99) delete drag.n.len; commit(drag.before); }
+    if (drag.kind === 'len') { if (drag.n.len < subAt(drag.n.t) * 0.99) delete drag.n.len; commit(drag.before); }
     if (drag.kind === 'move') { const changed = drag.orig.some(([n, t0, l0]) => n.t !== t0 || n.lane !== l0); if (changed) commit(drag.before); }
     if (drag.kind === 'box') {
       const ta = tOf(Math.min(drag.x0, drag.x1)), tb = tOf(Math.max(drag.x0, drag.x1));
@@ -206,7 +229,7 @@ export async function openEditor(chartId, nav) {
   function seekTo(t) { pos = clamp(t, 0, buffer.duration); if (player.playing) player.play(pos, rate); }
   function togglePlay() {
     if (player.playing) { player.stop(); pos = player.startPos; }
-    else { player.play(pos, rate); lastTick = pos; lastMetro = Math.floor((pos - chart.offset) / beat()); }
+    else { player.play(pos, rate); lastTick = pos; const ba = beatAt(TP(), pos); lastMetro = ba.i * 100000 + Math.floor(ba.beat); }
     root.querySelector('[data-a=play]').innerHTML = player.playing ? icon('pause') + 'Pause' : icon('play') + 'Play';
   }
   const tapTimes = [];
@@ -219,7 +242,7 @@ export async function openEditor(chartId, nav) {
       setBpm(Math.round(60 / iv * 10) / 10);
     } else toast(`Tap ${4 - tapTimes.length} more`);
   }
-  function setBpm(v) { chart.bpm = clamp(+v || 120, 40, 300); $f('bpm').value = chart.bpm; markDirty(); }
+  function setBpm(v) { const tp = TP(); tp[indexAt(tp, pos)].bpm = clamp(+v || 120, 40, 300); setTiming(tp); }
 
   // ---------- toolbar
   root.addEventListener('click', async e => {
@@ -240,6 +263,16 @@ export async function openEditor(chartId, nav) {
     if (a === 'zoomin') zoom(1.4);
     if (a === 'zoomout') zoom(1 / 1.4);
     if (a === 'tap') tapTempo();
+    if (a === 'tpadd') {
+      const tp = TP(), t = snap(pos), cur = tp[indexAt(tp, t)];
+      if (tp.some(p => Math.abs(p.t - t) < 0.05)) { toast('There is already a tempo change here', true); return; }
+      tp.push({ t, bpm: cur.bpm }); setTiming(tp); toast('New tempo section: set its BPM and first beat');
+    }
+    if (a === 'tpdel') {
+      const tp = TP(), i = indexAt(tp, pos);
+      if (tp.length < 2 || i === 0) { toast('The first tempo can’t be removed; edit its BPM instead', true); return; }
+      tp.splice(i, 1); setTiming(tp); toast('Tempo section removed');
+    }
     if (a === 'side') root.querySelector('.ed-side').classList.toggle('open');
     if (a === 'detect') await detect();
     if (a === 'auto') await runAuto();
@@ -248,11 +281,11 @@ export async function openEditor(chartId, nav) {
     if (a === 'publish') await publish();
     if (a === 'pack') { await save(); toast('Packing…'); try { downloadBytes(slug(chart.title) + '.bsq', await exportPack(chart)); } catch (err) { toast('Export failed: ' + err.message, true); } }
   });
-  function zoom(f) { const t = player.playing ? player.time() : pos, cx = xOf(t); pps = clamp(pps * f, 50, 1600); viewStart = t - cx / pps; }
+  function zoom(f) { const t = player.playing ? player.time() : pos, cx = clamp(xOf(t), 0, W); pps = clamp(pps * f, 50, 1600); viewStart = clamp(t - cx / pps, -2, buffer.duration); }
   root.addEventListener('change', e => {
     const f = e.target.dataset.f;
     if (f === 'bpm') setBpm(e.target.value);
-    else if (f === 'offset') { chart.offset = (+e.target.value || 0) / 1000; markDirty(); }
+    else if (f === 'offset') { const tp = TP(); tp[indexAt(tp, pos)].t = (+e.target.value || 0) / 1000; setTiming(tp); }
     else if (['title', 'artist', 'difficulty', 'level'].includes(f)) markDirty();
   });
   root.querySelector('[data-import]').addEventListener('change', async e => {
@@ -262,22 +295,24 @@ export async function openEditor(chartId, nav) {
       if (!Array.isArray(data.notes)) throw new Error('no notes in file');
       const b = snapshot();
       notes = data.notes.filter(n => Number.isFinite(n.t) && n.lane >= 0 && n.lane <= 3).map(n => ({ t: n.t, lane: n.lane | 0, ...(n.len ? { len: n.len } : {}), ...(n.type === 'pierce' ? { type: 'pierce' } : {}) }));
-      if (data.bpm) setBpm(data.bpm);
-      if (Number.isFinite(data.offset)) { chart.offset = data.offset; $f('offset').value = Math.round(data.offset * 1000); }
+      if (cleanTiming(data.timing)) setTiming(data.timing);
+      else if (data.bpm) setTiming([{ t: Number.isFinite(data.offset) ? data.offset : chart.offset, bpm: data.bpm }]);
       if (data.difficulty && DIFFS.includes(data.difficulty)) $f('difficulty').value = data.difficulty;
       commit(b); toast(`Imported ${notes.length} notes`);
     } catch (err) { toast('Import failed: ' + err.message, true); }
     e.target.value = '';
   });
-  const exportJson = () => JSON.stringify({ format: 'beatsqare-chart', v: 1, title: chart.title, artist: chart.artist, difficulty: chart.difficulty, level: chart.level, bpm: chart.bpm, offset: chart.offset, duration: chart.duration, song: chart.song, notes: chart.notes }, null, 1);
+  const exportJson = () => JSON.stringify({ format: 'beatsqare-chart', v: 1, title: chart.title, artist: chart.artist, difficulty: chart.difficulty, level: chart.level, bpm: chart.bpm, offset: chart.offset, timing: chart.timing, duration: chart.duration, song: chart.song, notes: chart.notes }, null, 1);
 
   async function detect() {
     const busy = toastBusy('Detecting BPM…');
     try {
       const A = await getAnalysis(chart.song, buffer);
       const r = detectBpm(A);
-      setBpm(r.bpm); chart.offset = r.offset; $f('offset').value = Math.round(r.offset * 1000);
-      toast(`BPM ${r.bpm} · first beat ${Math.round(r.offset * 1000)} ms`);
+      toast('Checking for tempo changes…');
+      const tp = await detectSections(A, r);
+      setTiming(tp);
+      toast(tp.length > 1 ? `Found ${tp.length} tempo sections: ${tp.map(p => +p.bpm.toFixed(1)).join(' → ')} BPM` : `BPM ${r.bpm} · first beat ${Math.round(r.offset * 1000)} ms`);
     } finally { busy(); }
   }
   async function runAuto() {
@@ -287,7 +322,7 @@ export async function openEditor(chartId, nav) {
       const A = await getAnalysis(chart.song, buffer);
       const b = snapshot();
       const d = $f('autodiff').value;
-      notes = autoChart(A, chart.bpm, chart.offset, d);
+      notes = autoChartTimed(A, TP(), d);
       $f('difficulty').value = d; $f('level').value = { Easy: 3, Normal: 6, Hard: 9, Expert: 12 }[d];
       commit(b); toast(`Drafted ${notes.length} notes · edit away`);
     } finally { busy(); }
@@ -327,7 +362,7 @@ export async function openEditor(chartId, nav) {
   // ---------- keyboard
   function onKey(e) {
     if (root.style.display === 'none') return;
-    if (e.target.matches('input,select,textarea')) { if (e.key === 'Enter') e.target.blur(); return; }
+    if (e.target?.matches?.('input,select,textarea')) { if (e.key === 'Enter') e.target.blur(); return; }
     const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
     if (k === ' ') { e.preventDefault(); togglePlay(); return; }
     if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
@@ -379,16 +414,17 @@ export async function openEditor(chartId, nav) {
       const want = now - (W * 0.3) / pps;
       if (xOf(now) > W * 0.7 || xOf(now) < 0) viewStart = want; else viewStart += (want - viewStart) * 0.08;
       if ($f('ticks').checked) for (const n of notes) if (n.t > lastTick && n.t <= now) hitSound(n.lane);
-      if ($f('metro').checked) { const bi = Math.floor((now - chart.offset) / beat()); if (bi !== lastMetro) { lastMetro = bi; if (bi >= 0) click(ac.currentTime, bi % 4 === 0); } }
+      if ($f('metro').checked) { const ba = beatAt(TP(), now), bi = Math.floor(ba.beat), key = ba.i * 100000 + bi; if (key !== lastMetro) { lastMetro = key; if (bi >= 0 || ba.i > 0) click(ac.currentTime, ((bi % 4) + 4) % 4 === 0); } }
       lastTick = now;
-    }
+    } else if (!drag && (xOf(pos) < 0 || xOf(pos) > W)) viewStart = clamp(pos - (W * 0.3) / pps, -2, buffer.duration); // keep a paused playhead in view
     draw(now);
-    const bi = (now - chart.offset) / beat();
+    syncTimingFields(false);
+    const bb = barBeat(TP(), now);
     tEl.textContent = `${Math.floor(now / 60)}:${(now % 60).toFixed(3).padStart(6, '0')}`;
-    bEl.textContent = `Bar ${Math.floor(bi / 4) + 1} · Beat ${((Math.floor(bi) % 4) + 4) % 4 + 1}`;
+    bEl.textContent = `Bar ${bb.bar} · Beat ${bb.beat}${bb.sections > 1 ? ` · ${+TP()[bb.section - 1].bpm.toFixed(1)} BPM` : ''}`;
     cEl.textContent = `${notes.length} notes`;
     sEl.textContent = sel.size ? `${sel.size} selected` : '';
-    const sk = notes.length + ':' + chart.bpm;
+    const sk = notes.length + ':' + chart.bpm + ':' + (chart.timing ? chart.timing.length : 1);
     if (sk !== statsKey) {
       statsKey = sk;
       const holds = notes.filter(n => n.len).length, pierce = notes.filter(n => n.type === 'pierce').length;
@@ -421,18 +457,20 @@ export async function openEditor(chartId, nav) {
     g.globalAlpha = 1;
     // ruler + grid
     g.fillStyle = '#05050a'; g.fillRect(0, WAVE, W, RULER);
-    const bt = beat(), sb = sub();
-    const k0 = Math.floor((t0 - chart.offset) / sb), k1 = Math.ceil((t1 - chart.offset) / sb);
-    const subPx = sb * pps;
-    for (let k = k0; k <= k1; k++) {
-      const t = chart.offset + k * sb, x = Math.round(xOf(t)) + 0.5;
-      if (t < 0 || t > buffer.duration) continue;
-      const isBeat = Math.abs(k % snapDiv) === 0, beatIdx = Math.round(k / snapDiv), isBar = isBeat && ((beatIdx % 4) + 4) % 4 === 0;
-      if (!isBeat && subPx < 6) continue;
-      if (isBeat && !isBar && bt * pps < 5) continue;
+    const tpl = TP();
+    for (const gl of gridLines(tpl, Math.max(0, t0), Math.min(buffer.duration, t1), snapDiv, 6, pps)) {
+      const x = Math.round(xOf(gl.t)) + 0.5, isBar = gl.bar, isBeat = gl.beat;
       g.strokeStyle = isBar ? '#3a4562' : isBeat ? '#222a3e' : '#141826'; g.lineWidth = 1;
       g.beginPath(); g.moveTo(x, isBar ? WAVE : lt); g.lineTo(x, lt + 4 * lh); g.stroke();
-      if (isBar) { g.fillStyle = '#8a96ad'; g.font = '500 10px "Martian Mono", monospace'; g.textBaseline = 'middle'; g.fillText(String(Math.floor(beatIdx / 4) + 1), x + 4, WAVE + RULER / 2); }
+      if (isBar) { g.fillStyle = '#8a96ad'; g.font = '500 10px "Martian Mono", monospace'; g.textBaseline = 'middle'; g.fillText(String(gl.barNo), x + 4, WAVE + RULER / 2); }
+    }
+    // tempo changes: dashed marker + BPM tag in the ruler
+    if (tpl.length > 1) for (const p of tpl) {
+      const x = Math.round(xOf(p.t)) + 0.5; if (x < -60 || x > W) continue;
+      g.setLineDash([2, 4]); g.strokeStyle = BALL; g.globalAlpha = 0.7; g.beginPath(); g.moveTo(x, WAVE); g.lineTo(x, lt + 4 * lh); g.stroke(); g.setLineDash([]);
+      g.globalAlpha = 1; g.fillStyle = BALL; g.font = '600 10px "Martian Mono", monospace'; g.textBaseline = 'middle';
+      const label = +p.bpm.toFixed(2) + ' BPM', w = g.measureText(label).width + 8;
+      g.fillRect(x, WAVE + 2, w, RULER - 4); g.fillStyle = '#05050a'; g.fillText(label, x + 4, WAVE + RULER / 2);
     }
     g.strokeStyle = '#191e2c'; g.beginPath(); g.moveTo(0, WAVE + 0.5); g.lineTo(W, WAVE + 0.5); g.moveTo(0, lt + 0.5); g.lineTo(W, lt + 0.5); g.stroke();
     // chord connectors
@@ -467,6 +505,7 @@ export async function openEditor(chartId, nav) {
     g.globalAlpha = 1; g.lineWidth = 1.5; g.stroke();
     g.fillStyle = BALL; g.beginPath(); g.moveTo(px - 6, 0); g.lineTo(px + 6, 0); g.lineTo(px, 8); g.fill();
   }
+  syncTimingFields(true);
   startLoop();
 
   // initial: detect BPM for a new chart, centre the view

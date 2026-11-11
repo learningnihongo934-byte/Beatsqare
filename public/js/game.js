@@ -1,11 +1,12 @@
 // Gameplay. Judging uses input timestamps mapped onto the audio output clock, so timing stays locked to the song.
 import { ctx, Player, loadSong, hitSound, missSound, energy } from './audio.js';
+import { points as timingPoints, beatAt } from './timing.js';
 import { DIR, COLORS, BALL, BAD, OPP, adjacent, getSettings, approachTime, setBest, getBest, api, esc, fmtNum, icon, clamp, $ } from './util.js';
 
 // Tight windows (prototype: ±110 ms total, <50 ms = top grade)
 export const WIN = { perfect: 0.040, great: 0.070, good: 0.110 };
 const WEIGHT = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
-const JCOL = { perfect: BALL, great: '#19f0ff', good: '#3dff7a', miss: BAD };
+const jcol = j => ({ perfect: BALL, great: COLORS[0], good: COLORS[2], miss: BAD })[j];
 const KEYS = { ArrowUp: 0, KeyW: 0, ArrowRight: 1, KeyD: 1, ArrowDown: 2, KeyS: 2, ArrowLeft: 3, KeyA: 3 };
 
 export function gradeOf(acc, perfectAll) {
@@ -44,7 +45,7 @@ export async function playChart(chart, opts = {}) {
   root.querySelector('[data-load]').remove();
 
   const player = new Player(buffer);
-  const beatLen = 60 / (chart.bpm || 120), beatOff = chart.offset || 0;
+  const TP = timingPoints(chart);
   const approach = approachTime();
   const startAt = Math.max(0, opts.start || 0);
   // notes (sorted), with per-note state
@@ -274,9 +275,9 @@ export async function playChart(chart, opts = {}) {
 
   function draw(now, dt) {
     const [eLow, eMid, eHigh] = energy();
-    const bp = ((now - beatOff) / beatLen), beatIdx = Math.floor(bp), phase = bp - beatIdx;
+    const ba = beatAt(TP, now), beatLen = 60 / TP[ba.i].bpm, beatIdx = Math.floor(ba.beat), phase = ba.beat - beatIdx, beatKey = ba.i * 100000 + beatIdx;
     const pulse = now > 0 ? Math.exp(-phase * 5) : 0;
-    if (beatIdx !== lastBeat && now > 0) { lastBeat = beatIdx; rings.push({ s: 1, a: beatIdx % 4 === 0 ? 1 : 0.55 }); }
+    if (beatKey !== lastBeat && now > 0) { lastBeat = beatKey; rings.push({ s: 1, a: ((beatIdx % 4) + 4) % 4 === 0 ? 1 : 0.55 }); }
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.globalCompositeOperation = 'source-over';
     g.fillStyle = '#05050a'; g.fillRect(0, 0, W, H);
@@ -398,7 +399,7 @@ export async function playChart(chart, opts = {}) {
     if (pop && pop.life > 0) {
       const txt = pop.j.toUpperCase(), s = 1 + (1 - pop.life) * 0.15 + (pop.life > 0.85 ? (pop.life - 0.85) * 2 : 0);
       g.font = `800 ${Math.round(Math.max(16, B * 0.15) * s)}px Tourney, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.globalAlpha = Math.min(1, pop.life * 2); g.fillStyle = JCOL[pop.j];
+      g.globalAlpha = Math.min(1, pop.life * 2); g.fillStyle = jcol(pop.j);
       g.fillText(txt, X, Y - B * 0.5);
       if (pop.j === 'great' || pop.j === 'good') { g.font = `500 ${Math.round(Math.max(9, B * 0.06))}px "Martian Mono", monospace`; g.fillStyle = '#8a96ad'; g.fillText(pop.d < 0 ? 'EARLY' : 'LATE', X, Y - B * 0.33); }
       g.globalAlpha = 1; pop.life -= dt * 2;
@@ -434,7 +435,7 @@ export async function playChart(chart, opts = {}) {
     const isBest = !opts.playtest && !opts.autoplay && startAt === 0 && setBest(key, result);
     const ov = document.createElement('div');
     ov.className = 'overlay'; ov.dataset.res = '1';
-    const gcol = { SS: BALL, S: BALL, A: '#19f0ff', B: '#3dff7a', C: '#ffb020', D: BAD }[grade];
+    const gcol = { SS: BALL, S: BALL, A: COLORS[0], B: COLORS[2], C: COLORS[3], D: BAD }[grade];
     ov.innerHTML = `<div class="res-grid">
       <div class="res-main frame pad" style="--c:${gcol}">
         <div class="head"><span class="lbl">${opts.autoplay ? 'Autoplay · not scored' : opts.playtest ? 'Playtest' : 'Stage clear'}</span><span class="lbl">${esc(chart.title)} · ${esc(chart.difficulty)}</span></div>

@@ -206,3 +206,93 @@ export function autoChart(A, bpm, offset, difficulty = 'Normal', seed = 7) {
   }
   return notes;
 }
+
+// ---------- tempo sections (timing points)
+// Windowed comb search; windows whose tempo shares the song's grid (×1, ×2, ×½, ×3/2, ×2/3, ×4/3, ×3/4) count as the
+// main tempo. Runs of ≥3 windows at another tempo become their own section. Returns [{t, bpm}] (first beat of each).
+export async function detectSections(A, main) {
+  const { fr, t0 } = A, n = A.flux.length;
+  const drum = new Float32Array(n); for (let i = 0; i < n; i++) drum[i] = A.low[i] + 0.7 * A.mid[i];
+  const at = (env, t) => envAt(env, fr, t0, t);
+  const WIN = 16, HOP = 8, wins = [];
+  for (let w = 0; w + WIN <= A.duration; w += HOP) {
+    let best = 0, bb = 0;
+    for (let b = 70; b <= 200; b += 0.25) {
+      const per = 60 / b;
+      for (let ph = 0; ph < per; ph += per / 20) {
+        let s = 0, k = 0; for (let t = w + ph; t < w + WIN; t += per) { s += at(A.flux, t) + 0.5 * at(A.flux, t + per / 2); k++; }
+        if (s / k > best) { best = s / k; bb = b; }
+      }
+    }
+    let e = 0, c = 0; for (let t = w; t < w + WIN; t += 0.05) { e += at(A.rms, t); c++; }
+    wins.push({ w, bpm: bb, loud: e / c });
+    if (wins.length % 6 === 0) await yieldUI();
+  }
+  const related = (a, b) => [1, 2, 0.5, 1.5, 2 / 3, 4 / 3, 0.75].some(r => Math.abs(a / b - r) < 0.006 * r);
+  // label each window: 'main', a foreign bpm, or null (quiet / unclear)
+  const lab = wins.map(x => x.loud < 0.12 ? null : related(x.bpm, main.bpm) ? 'main' : x.bpm);
+  const runs = [];
+  for (let i = 0; i < lab.length;) {
+    let j = i + 1;
+    const same = (a, b) => a === b || (a !== 'main' && b !== 'main' && a && b && (related(a, b)));
+    while (j < lab.length && same(lab[j], lab[i])) j++;
+    runs.push({ from: i, to: j, label: lab[i] });
+    i = j;
+  }
+  // refine a section's tempo + phase on drums (± span around a guess)
+  const refine = (a, b, guess, span) => {
+    let best = -1, bb = guess, bp = 0;
+    for (let x = guess - span; x <= guess + span; x += 0.01) {
+      const per = 60 / x;
+      for (let ph = 0; ph < per; ph += per / 48) { let s = 0, k = 0; for (let t = a + ph; t < b; t += per) { s += at(drum, t) + 0.5 * at(A.flux, t + per / 2); k++; } s /= k; if (s > best) { best = s; bb = x; bp = ph; } }
+    }
+    const r = Math.round(bb * 2) / 2; if (Math.abs(bb - r) < 0.04) bb = r;
+    return { t: +(a + bp).toFixed(4), bpm: +bb.toFixed(2) };
+  };
+  const out = [];
+  for (const r of runs) {
+    if (!r.label) continue;
+    if (r.label !== 'main' && r.to - r.from < 3) continue; // too short to trust
+    const a = wins[r.from].w + (r.from ? HOP / 2 : 0), b = wins[r.to - 1].w + WIN - (r.to < wins.length ? HOP / 2 : 0);
+    if (b - a < 12) continue;
+    let bpm = main.bpm;
+    if (r.label !== 'main') { // majority vote over the run's windows, folded into 95–200
+      const votes = new Map();
+      for (let i = r.from; i < r.to; i++) { let v = wins[i].bpm; while (v < 95) v *= 2; while (v >= 200) v /= 2; v = Math.round(v * 2) / 2; votes.set(v, (votes.get(v) || 0) + 1); }
+      bpm = [...votes.entries()].sort((x, y) => y[1] - x[1])[0][0];
+    }
+    const p = refine(a, b, bpm, r.label === 'main' ? 0.15 : 0.6);
+    const last = out[out.length - 1];
+    if (last && Math.abs(last.bpm - p.bpm) < 0.05) continue; // same tempo continues
+    if (last) { // move the seam to where the new grid starts fitting better than the old one
+      const fit = (q, x, y) => { const per = 60 / q.bpm; let s = 0, k = 0; for (let t = q.t + Math.ceil((x - q.t) / per) * per; t < y; t += per) { s += at(drum, t); k++; } return k ? s / k : 0; };
+      let bestC = a, bestS = -1;
+      for (let c = a - HOP; c <= a + HOP; c += 0.25) { const sc = fit(last, c - 6, c) + fit(p, c, c + 6); if (sc > bestS) { bestS = sc; bestC = c; } }
+      const per = 60 / p.bpm;
+      p.t = +(p.t + Math.ceil((bestC - p.t) / per - 1e-6) * per).toFixed(4);
+    }
+    out.push(p);
+  }
+  if (out.length <= 1) return [{ t: main.offset, bpm: main.bpm }];
+  // first section starts at its first beat, but beats before it extrapolate from there
+  return out;
+}
+
+// Auto-chart over timing points: each section is charted on its own grid, then the seams are cleaned up.
+export function autoChartTimed(A, tp, difficulty = 'Normal', seed = 7) {
+  if (tp.length <= 1) return autoChart(A, tp[0].bpm, tp[0].t, difficulty, seed);
+  let notes = [];
+  for (let i = 0; i < tp.length; i++) {
+    const p = tp[i], per = 60 / p.bpm, off = p.t - Math.floor(p.t / per) * per;
+    const a = i ? p.t - 0.02 : -1, b = i + 1 < tp.length ? tp[i + 1].t - 0.02 : Infinity;
+    for (const nt of autoChart(A, p.bpm, off, difficulty, seed + i)) {
+      if (nt.t < a || nt.t >= b) continue;
+      if (nt.len && nt.t + nt.len > b - 0.15) { nt.len = +(b - 0.15 - nt.t).toFixed(4); if (nt.len < per * 0.5) delete nt.len; }
+      notes.push(nt);
+    }
+  }
+  notes.sort((x, y) => x.t - y.t || x.lane - y.lane);
+  const clean = [];
+  for (const nt of notes) { const p = clean[clean.length - 1]; if (p && nt.t - p.t > 0.003 && nt.t - p.t < 0.09) continue; clean.push(nt); }
+  return clean;
+}

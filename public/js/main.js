@@ -1,10 +1,11 @@
 // App shell: router + screens (title, song select, create, songs, catalog, settings) and the menu background.
 import { ctx, ac, loadSong, outAt, outNow, click, energy, applyVolume, rememberBuffer, decode, songKey, renderDemo } from './audio.js';
+import { songMeta, askSongInfo, readTags, tidySongInfo, THEMES, applyTheme } from './util.js';
 import { $, $$, esc, icon, toast, api, idb, getSettings, saveSettings, getBest, fmtTime, fmtNum, clamp, uploadFile, downloadText, slug, COLORS, DIFFS, approachTime, uid } from './util.js';
 import { DEMO_CHARTS, newChart, saveCatalogChart, importChartFile } from './charts.js';
 import { playChart, chartKey } from './game.js';
 import { openEditor, getAnalysis } from './editor.js';
-import { detectBpm, autoChart } from './analysis.js';
+import { detectBpm, detectSections, autoChartTimed } from './analysis.js';
 import { exportPack, downloadBytes } from './pack.js';
 import { CHANGELOG, LATEST } from './changelog.js';
 import { songSelect, credit } from './select.js';
@@ -101,8 +102,9 @@ async function library(selId) { closeScreen = await songSelect(app, bar, nav, se
 async function play(arg) {
   const [rawId, mode] = arg.split('/');
   const id = decodeURIComponent(rawId), autoplay = mode === 'auto';
-  const c = DEMO_CHARTS.find(x => x.id === id) || await idb.chart(id);
-  if (!c) { toast('Chart not found', true); return nav('#/library'); }
+  const c0 = DEMO_CHARTS.find(x => x.id === id) || await idb.chart(id);
+  if (!c0) { toast('Chart not found', true); return nav('#/library'); }
+  const m = songMeta(songKey(c0.song)), c = m && c0.builtin ? { ...c0, title: m.title, artist: m.artist } : c0;
   bgOn = false; app.innerHTML = '';
   let action = 'restart';
   while (action === 'restart') ({ action } = await playChart(c, { autoplay, editable: !c.builtin && !c.id.startsWith('cat-') }));
@@ -139,7 +141,12 @@ async function handleFile(file) {
   let buf;
   try { buf = await decode(raw); } catch { msg.textContent = 'mp3 · ogg · wav'; return toast("Couldn't read that audio file", true); }
   const name = file.name.replace(/\.[^.]+$/, '');
-  const [artist, title] = name.includes(' - ') ? name.split(' - ', 2) : ['', name];
+  const dash = name.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  const fromName = tidySongInfo(dash ? { artist: dash[1], title: dash[2] } : { title: name });
+  const tags = readTags(raw), fromTags = tags && tidySongInfo(tags);
+  const info = await askSongInfo({ title: fromTags?.title || fromName.title, artist: fromTags?.artist || fromName.artist, source: tags ? 'From the file’s tags' : 'From the file name' }, 'Name this song');
+  if (!info) { msg.textContent = 'mp3 · mp4 · ogg · wav'; return; }
+  const { title, artist } = info;
   let song;
   try {
     msg.textContent = 'Uploading…';
@@ -224,9 +231,9 @@ async function autoPlay(song, t) {
     const buf = await loadSong(song, p => ($('[data-p]', ov).textContent = p >= 0 ? Math.round(p * 100) + '%' : Math.round(-p / 1024) + ' KB'));
     $('[data-st]', ov).textContent = 'Listening for the beat';
     const A = await getAnalysis(song, buf, p => ($('[data-p]', ov).textContent = Math.round(p * 100) + '%'));
-    const { bpm, offset } = detectBpm(A);
+    const main = detectBpm(A), tp = await detectSections(A, main), { bpm } = tp[0], offset = tp.length > 1 ? tp[0].t % (60 / bpm) : tp[0].t;
     const c = await newChart(song, { title: t.title, artist: t.artist, duration: buf.duration });
-    Object.assign(c, { bpm, offset, bpmSet: true, notes: autoChart(A, bpm, offset, 'Normal'), difficulty: 'Normal', level: 6, title: t.title + ' (auto)' });
+    Object.assign(c, { bpm, offset, ...(tp.length > 1 ? { timing: tp } : {}), bpmSet: true, notes: autoChartTimed(A, tp, 'Normal'), difficulty: 'Normal', level: 6, title: t.title + ' (auto)' });
     await idb.putChart(c);
     ov.remove();
     nav('#/play/' + c.id);
@@ -302,6 +309,7 @@ function settings() {
   const toggles = [['menuMusic', 'Menu music'], ['hitsounds', 'Hit sounds'], ['crt', 'CRT bloom + scanlines'], ['shake', 'Screen shake on miss'], ['particles', 'Hit particles']];
   app.innerHTML = `${bar('#/settings')}<section class="page">
     <div class="span-12 head" style="margin:0"><h2 class="sec-title">Settings</h2><span class="lbl">Saved on this device</span></div>
+    <div class="span-12 frame pad theme" data-theme style="--c:var(--right)"></div>
     <div class="span-7">
       <div class="set-row"><span class="lbl">Handle</span><input class="input" data-k="handle" value="${esc(S.handle)}" maxlength="24"><span class="v dim">public</span></div>
       ${rows.map(([k, l, a, b, st, f]) => `<div class="set-row"><span class="lbl">${l}</span><input type="range" data-k="${k}" min="${a}" max="${b}" step="${st}" value="${S[k]}"><span class="v" data-v="${k}">${f(S[k])}</span></div>`).join('')}
@@ -315,6 +323,34 @@ function settings() {
       <div class="row" style="margin-top:12px"><button class="btn pri" data-a="start" style="--c:var(--ball)">Start</button><button class="btn" data-a="apply" disabled>Apply</button><span class="muted" data-res style="font-size:12px"></span></div>
       <p class="help" data-help>Audio: we play 16 clicks. Tap on each one; the median gap becomes your audio offset, so judgement matches what you hear.</p>
     </div></section>`;
+  // ---- theme: presets + custom colour per side and ball
+  const SIDE = ['Up', 'Right', 'Down', 'Left'];
+  const curTheme = () => S.theme && S.theme.colors ? S.theme : { ...THEMES[0], colors: [...THEMES[0].colors] };
+  const swatch = t => `<span class="sw">${t.colors.map(c => `<i style="background:${c}"></i>`).join('')}<b style="background:${t.ball}"></b></span>`;
+  const box = t => `<svg viewBox="0 0 60 60" class="theme-box" aria-hidden="true"><path d="M12 12h36" stroke="${t.colors[0]}" stroke-width="3"/><path d="M48 12v36" stroke="${t.colors[1]}" stroke-width="3"/><path d="M48 48H12" stroke="${t.colors[2]}" stroke-width="3"/><path d="M12 48V12" stroke="${t.colors[3]}" stroke-width="3"/><circle cx="30" cy="30" r="4" fill="${t.ball}"/></svg>`;
+  function renderTheme() {
+    const t = curTheme(), same = p => p.colors.every((c, i) => c.toLowerCase() === t.colors[i].toLowerCase()) && p.ball.toLowerCase() === t.ball.toLowerCase();
+    $('[data-theme]').innerHTML = `<div class="head"><h3 class="sec-title" style="font-size:20px">Theme</h3><span class="lbl">Colours of the four sides and the ball, everywhere in the game</span></div>
+      <div class="theme-grid">
+        <div>${box(t)}</div>
+        <div><span class="lbl">Presets</span><div class="presets">${THEMES.map((p, i) => `<button class="preset ${same(p) ? 'on' : ''}" data-preset="${i}">${swatch(p)}<span>${p.name}</span></button>`).join('')}</div></div>
+        <div><span class="lbl">Custom</span><div class="pickers">${SIDE.map((n, i) => `<label class="picker"><input type="color" data-col="${i}" value="${t.colors[i]}"><span>${n}</span></label>`).join('')}<label class="picker"><input type="color" data-col="ball" value="${t.ball}"><span>Ball</span></label></div></div>
+      </div>`;
+  }
+  renderTheme();
+  $('[data-theme]').addEventListener('click', e => {
+    const b = e.target.closest('[data-preset]'); if (!b) return;
+    const p = THEMES[+b.dataset.preset];
+    saveSettings({ theme: { colors: [...p.colors], ball: p.ball } }); applyTheme(); renderTheme();
+  });
+  $('[data-theme]').addEventListener('input', e => {
+    const k = e.target.dataset.col; if (k === undefined) return;
+    const t = curTheme(), nt = { colors: [...t.colors], ball: t.ball };
+    if (k === 'ball') nt.ball = e.target.value; else nt.colors[+k] = e.target.value;
+    saveSettings({ theme: nt }); applyTheme();
+    $('.theme-box').outerHTML = box(nt);
+    $$('.preset').forEach(x => x.classList.remove('on'));
+  });
   const fmt = Object.fromEntries(rows.map(r => [r[0], r[5]]));
   app.addEventListener('input', e => {
     const k = e.target.dataset.k; if (!k) return;

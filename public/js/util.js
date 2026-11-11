@@ -3,8 +3,16 @@
 export const LANES = ['up', 'right', 'down', 'left'];
 export const LANE_NAMES = ['Up', 'Right', 'Down', 'Left'];
 export const DIR = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-export const COLORS = ['#19f0ff', '#ff2bd6', '#3dff7a', '#ffb020'];
-export const BALL = '#fff6a0';
+export const COLORS = ['#19f0ff', '#ff2bd6', '#3dff7a', '#ffb020']; // mutated in place by applyTheme
+export let BALL = '#fff6a0';                                            // live binding, reassigned by applyTheme
+export const THEMES = [
+  { name: 'Vector', colors: ['#19f0ff', '#ff2bd6', '#3dff7a', '#ffb020'], ball: '#fff6a0' },
+  { name: 'Sunset', colors: ['#ffb03d', '#ff3d7f', '#ff7a3d', '#b45cff'], ball: '#fff1d6' },
+  { name: 'Ocean', colors: ['#3dd6ff', '#4d7bff', '#3dffc8', '#9a7bff'], ball: '#e8fbff' },
+  { name: 'Phosphor', colors: ['#9dffb4', '#4ee07a', '#c9ffd6', '#2fbf5c'], ball: '#f0fff3' },
+  { name: 'Amber', colors: ['#ffc040', '#ff8a00', '#ffe08a', '#ff6a1a'], ball: '#fff4d8' },
+  { name: 'Sakura', colors: ['#ff9fd0', '#ff5fa2', '#ffd8ec', '#c78bff'], ball: '#ffffff' },
+];
 export const BAD = '#ff3b5c';
 export const OPP = [2, 3, 0, 1];
 export const adjacent = (a, b) => a !== b && OPP[a] !== b;
@@ -26,6 +34,7 @@ const DEFAULTS = {
   volume: 0.85, hitVolume: 0.5, hitsounds: true,
   crt: true, shake: true, particles: true, menuMusic: true,
   handle: '',
+  theme: null, // { colors: [up, right, down, left], ball }
 };
 let settings;
 try { settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('bsq.settings') || '{}') }; } catch { settings = { ...DEFAULTS }; }
@@ -35,6 +44,65 @@ export function saveSettings(patch) {
   if (patch) Object.assign(settings, patch);
   try { localStorage.setItem('bsq.settings', JSON.stringify(settings)); } catch {}
   document.body.classList.toggle('no-crt', !settings.crt);
+}
+export function applyTheme(theme = settings.theme) {
+  const t = theme && theme.colors && theme.colors.length === 4 ? theme : THEMES[0];
+  t.colors.forEach((c, i) => (COLORS[i] = c));
+  BALL = t.ball || THEMES[0].ball;
+  const r = document.documentElement.style;
+  ['up', 'right', 'down', 'left'].forEach((k, i) => r.setProperty('--' + k, COLORS[i]));
+  r.setProperty('--ball', BALL);
+}
+applyTheme();
+
+// ---------- per-song title / artist overrides (also written into this device's charts)
+export function songMeta(key) { try { return JSON.parse(localStorage.getItem('bsq.songMeta') || '{}')[key] || null; } catch { return null; } }
+export function setSongMeta(key, meta) {
+  try { const all = JSON.parse(localStorage.getItem('bsq.songMeta') || '{}'); all[key] = meta; localStorage.setItem('bsq.songMeta', JSON.stringify(all)); } catch {}
+}
+
+// Modal: confirm or edit a song's title and artist (prefilled from the file's tags or name)
+export function askSongInfo(info, heading = 'Song info') {
+  return new Promise(res => {
+    const ov = document.createElement('div');
+    ov.className = 'overlay'; ov.style.position = 'fixed'; ov.style.zIndex = 40;
+    ov.innerHTML = `<form class="panel frame pad" style="--c:var(--down)">
+      <div class="head"><h2 class="sec-title" style="font-size:22px">${esc(heading)}</h2>${info.source ? `<span class="lbl">${esc(info.source)}</span>` : ''}</div>
+      <div class="field"><span class="lbl">Title</span><input class="input" name="title" maxlength="80" required value="${esc(info.title || '')}"></div>
+      <div class="field" style="margin-top:12px"><span class="lbl">Artist</span><input class="input" name="artist" maxlength="80" value="${esc(info.artist || '')}"></div>
+      <div class="row" style="margin-top:18px"><button class="btn pri" style="--c:var(--down)">Save</button><button class="btn" type="button" data-x>Cancel</button></div></form>`;
+    document.body.appendChild(ov);
+    const f = ov.querySelector('form');
+    f.title.focus(); f.title.select();
+    f.onsubmit = e => { e.preventDefault(); ov.remove(); res({ title: f.title.value.trim() || 'Untitled', artist: f.artist.value.trim() }); };
+    ov.querySelector('[data-x]').onclick = () => { ov.remove(); res(null); };
+  });
+}
+
+// Title / artist from an mp3's ID3v2 tag (v2.3 / v2.4: TIT2, TPE1), or null
+export function readTags(buf) {
+  try {
+    const b = new Uint8Array(buf);
+    if (b[0] !== 0x49 || b[1] !== 0x44 || b[2] !== 0x33) return null;
+    const ver = b[3], size = (b[6] << 21) | (b[7] << 14) | (b[8] << 7) | b[9];
+    const out = {};
+    let p = 10;
+    if (b[5] & 0x40) p += ver === 4 ? ((b[10] << 21) | (b[11] << 14) | (b[12] << 7) | b[13]) : (((b[10] << 24) | (b[11] << 16) | (b[12] << 8) | b[13]) + 4);
+    const text = (a, e) => {
+      const enc = b[a], body = b.subarray(a + 1, e);
+      const dec = enc === 0 ? new TextDecoder('latin1') : enc === 1 ? new TextDecoder('utf-16') : enc === 2 ? new TextDecoder('utf-16be') : new TextDecoder('utf-8');
+      return dec.decode(body).replace(/\u0000+$/g, '').split('\u0000')[0].trim();
+    };
+    while (p + 10 < 10 + size && p + 10 < b.length) {
+      const id = String.fromCharCode(b[p], b[p + 1], b[p + 2], b[p + 3]);
+      if (!/^[A-Z0-9]{4}$/.test(id)) break;
+      const len = ver === 4 ? ((b[p + 4] << 21) | (b[p + 5] << 14) | (b[p + 6] << 7) | b[p + 7]) : ((b[p + 4] << 24) | (b[p + 5] << 16) | (b[p + 6] << 8) | b[p + 7]);
+      if (id === 'TIT2') out.title = text(p + 10, p + 10 + len);
+      if (id === 'TPE1') out.artist = text(p + 10, p + 10 + len);
+      p += 10 + len;
+    }
+    return out.title || out.artist ? out : null;
+  } catch { return null; }
 }
 export const approachTime = (speed = settings.speed) => 2.3 - speed * 0.18; // speed 5 → 1.4 s (prototype feel)
 
@@ -148,4 +216,30 @@ export function pickAudioFile(song) {
     ov.querySelector('input').onchange = e => { const f = e.target.files[0]; if (f) { ov.remove(); res(f); } };
     ov.querySelector('[data-x]').onclick = () => { ov.remove(); rej(new Error('No song file picked.')); };
   });
+}
+
+// Strip video-upload clutter from titles: (Official Video), 【MV】, （Lyric Video）, 【… MAD】, (TV anime … OP), etc.
+// A leading 【Artist】 or "Artist「Title」" fills in a missing artist.
+export function tidySongInfo({ title = '', artist = '' }) {
+  const junk = /official|video|lyric|\bmv\b|\bpv\b|audio|\bmad\b|\bhd\b|\b4k\b|full ver|主題歌|アニメ|\bop\b|\bed\b|visualizer|remaster|kbps|\bncs\b|copyright free/i;
+  const OPEN = '【[(（「『', CLOSE = '】])）」』';
+  const strip = s => { // drop bracket groups (nesting-aware) whose text is upload clutter
+    s = String(s || ''); let out = '';
+    for (let i = 0; i < s.length; i++) {
+      if (OPEN.includes(s[i])) {
+        let d = 0, j = i;
+        for (; j < s.length; j++) { if (OPEN.includes(s[j])) d++; else if (CLOSE.includes(s[j]) && --d === 0) break; }
+        if (j < s.length && junk.test(s.slice(i + 1, j))) { out += ' '; i = j; continue; }
+      }
+      out += s[i];
+    }
+    return out.replace(/\s+/g, ' ').trim();
+  };
+  let t = strip(title), a = strip(artist);
+  const lead = t.match(/^【([^】]+)】\s*(.+)$/);
+  if (lead) { if (!a) a = lead[1].trim(); t = lead[2].trim(); }
+  a = a.replace(/^【[^】]*】\s*/, '').trim();
+  const kagi = t.match(/^(.+?)\s*[「『]\s*(.+?)\s*[」』]\s*$/);
+  if (kagi) { if (!a) a = kagi[1].trim(); t = kagi[2].trim(); }
+  return { title: t || String(title).trim(), artist: a };
 }

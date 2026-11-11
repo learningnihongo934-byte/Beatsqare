@@ -52,8 +52,8 @@ export async function importPack(buf) {
 // Export: bundle a song with all library charts that use it.
 export async function exportPack(chart) {
   const all = (await idb.charts()).filter(c => songKey(c.song) === songKey(chart.song) && c.notes.length);
-  const charts = (all.length ? all : [chart]).map(c => ({ title: c.title, artist: c.artist, difficulty: c.difficulty, level: c.level, bpm: c.bpm, offset: c.offset, duration: c.duration, notes: c.notes }));
-  if (!all.some(c => c.id === chart.id)) charts.unshift({ title: chart.title, artist: chart.artist, difficulty: chart.difficulty, level: chart.level, bpm: chart.bpm, offset: chart.offset, duration: chart.duration, notes: chart.notes });
+  const charts = (all.length ? all : [chart]).map(c => ({ title: c.title, artist: c.artist, difficulty: c.difficulty, level: c.level, bpm: c.bpm, offset: c.offset, timing: c.timing, duration: c.duration, notes: c.notes }));
+  if (!all.some(c => c.id === chart.id)) charts.unshift({ title: chart.title, artist: chart.artist, difficulty: chart.difficulty, level: chart.level, bpm: chart.bpm, offset: chart.offset, timing: chart.timing, duration: chart.duration, notes: chart.notes });
   const { bytes, mime, name } = await rawAudio(chart.song, chart.title);
   return encodePack({ title: chart.title, artist: chart.artist || '', audio: { name, mime, size: bytes.byteLength }, charts }, bytes);
 }

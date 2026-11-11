@@ -1,10 +1,12 @@
 // Song select: song wheel on the right (one row per song), jacket + difficulty tabs + chart graph on the left.
 import { songKey } from './audio.js';
+import { songMeta, setSongMeta, askSongInfo } from './util.js';
 import { $, $$, esc, icon, toast, idb, getBest, fmtTime, fmtNum, clamp, uid, downloadText, slug, COLORS, DIFFS } from './util.js';
 import { DEMO_CHARTS, importChartFile } from './charts.js';
 import { chartKey } from './game.js';
 import { exportPack, downloadBytes } from './pack.js';
 import { preview } from './music.js';
+import { bpmLabel } from './timing.js';
 
 const DCOL = { Easy: 'down', Normal: 'up', Hard: 'left', Expert: 'right' };
 const GRADE_RANK = { SS: 6, S: 5, A: 4, B: 3, C: 2, D: 1 };
@@ -30,6 +32,7 @@ async function songGroups() {
     if (c.song.art && !g.song.art) g.song = c.song;
   }
   for (const g of map.values()) {
+    const m = songMeta(g.key); if (m) { g.title = m.title || g.title; g.artist = m.artist ?? g.artist; }
     g.charts.sort((a, b) => DIFFS.indexOf(a.difficulty) - DIFFS.indexOf(b.difficulty) || (a.level || 0) - (b.level || 0) || (a.builtin ? -1 : 1));
     g.best = g.charts.map(c => getBest(chartKey(c))).filter(Boolean).sort((a, b) => GRADE_RANK[b.grade] - GRADE_RANK[a.grade])[0] || null;
     g.maxLevel = Math.max(...g.charts.map(c => c.level || 0));
@@ -115,11 +118,11 @@ export async function songSelect(app, bar, nav, selId) {
     det.style.setProperty('--c', `var(--${DCOL[c.difficulty] || 'up'})`);
     det.innerHTML = `
       <div class="ss-top">
-        <div class="jk">${jacket(g)}<span class="jk-bpm">${+(+c.bpm).toFixed(1)} BPM</span></div>
+        <div class="jk">${jacket(g)}<span class="jk-bpm">${bpmLabel(c)} BPM</span></div>
         <div class="ss-meta">
           <div class="lbl">${g.charts[0].builtin ? 'Built-in' : g.song.source === 'audius' ? 'Audius' : g.song.source === 'upload' ? 'Uploaded' : 'On this device'} · ${fmtTime(c.duration)}</div>
           <h2 class="disp ss-title">${esc(g.title)}</h2>
-          <div class="muted">${esc(g.artist || 'Unknown artist')}</div>
+          <div class="muted">${esc(g.artist || 'Unknown artist')} <button class="btn sm" data-a="info" style="margin-left:8px;--c:var(--down)" title="Edit the song's title and artist">${icon('edit')}Edit info</button></div>
           <p class="credit">${credit(g.song)}</p>
         </div>
       </div>
@@ -138,7 +141,7 @@ export async function songSelect(app, bar, nav, selId) {
         <button class="btn" data-a="pack" title="Song + every chart for it in one file">${icon('down')}.bsq</button>
         ${!c.builtin ? `<button class="btn" data-a="del" style="--c:var(--bad)" aria-label="Remove chart">${icon('x')}</button>` : ''}
       </div>`;
-    preview({ key: g.key, song: g.song, title: g.title, artist: g.artist, bpm: c.bpm, offset: c.offset || 0 });
+    preview({ key: g.key, song: g.song, title: g.title, artist: g.artist, bpm: c.bpm, offset: c.offset || 0, timing: c.timing });
   }
   function select(i, scroll = true) {
     if (!view.length) { renderList(); renderDetail(); return; }
@@ -156,6 +159,15 @@ export async function songSelect(app, bar, nav, selId) {
     const d = e.target.closest('.ss-diff'); if (d) { ci = +d.dataset.ci; renderDetail(); return; }
     const a = e.target.closest('[data-a]')?.dataset.a, g = view[gi], c = g?.charts[ci];
     if (!a || !c) return;
+    if (a === 'info') {
+      const r = await askSongInfo({ title: g.title, artist: g.artist }, 'Edit song info');
+      if (!r) return;
+      setSongMeta(g.key, r);
+      for (const ch of g.charts) if (!ch.builtin) { const suffix = (ch.title.match(/ \((edit|my chart|auto)\)$/) || [''])[0]; await idb.putChart({ ...ch, title: r.title + suffix, artist: r.artist, updated: Date.now() }); }
+      const key = g.key; groups = await songGroups(); filter(); gi = Math.max(0, view.findIndex(x => x.key === key)); renderList(); select(gi, false);
+      toast('Song info saved');
+      return;
+    }
     if (a === 'play') go();
     if (a === 'auto') go(true);
     if (a === 'pack') { toast('Packing…'); try { downloadBytes(slug(g.title) + '.bsq', await exportPack(c)); } catch (err) { toast('Export failed: ' + err.message, true); } }

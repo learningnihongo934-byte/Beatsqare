@@ -2,6 +2,13 @@
 
 Also in the game at `#/updates`.
 
+## v1.8 — Background video fixed (2026-11-11)
+
+- **Fixed:** Background videos now actually play. The video used to re-seek every frame while starting and could stay stuck, so it never showed.
+- **Improved:** Video stays in sync by nudging its speed instead of jumping; it only hard-seeks when it’s far off.
+- **Improved:** Background video is on by default. Songs without a video are unaffected.
+- **New:** The pause menu has a Background video on/off switch for songs that have one.
+
 ## v1.7 — The screen is the box (2026-11-11)
 
 - **New:** Home is the game box. Sides and corners are destinations (Play, Create, Songs, Catalog / Profile, Shop, Settings, Updates). Arrow keys or WASD aim the ball, two keys aim at a corner, Enter or a second press goes. On phones, swipe to aim and lift to go.

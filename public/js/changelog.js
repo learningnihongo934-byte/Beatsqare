@@ -1,6 +1,15 @@
 // Update log, newest first. Shown at #/updates; the title screen flags a version you haven't seen.
 export const CHANGELOG = [
   {
+    v: '1.8', date: '2026-11-11', title: 'Background video fixed',
+    items: [
+      ['fix', 'Background videos now actually play. The video used to re-seek every frame while starting and could stay stuck, so it never showed.'],
+      ['up', 'Video stays in sync by nudging its speed instead of jumping; it only hard-seeks when it’s far off.'],
+      ['up', 'Background video is on by default. Songs without a video are unaffected.'],
+      ['new', 'The pause menu has a Background video on/off switch for songs that have one.'],
+    ],
+  },
+  {
     v: '1.7', date: '2026-11-11', title: 'The screen is the box',
     items: [
       ['new', 'Home is the game box. Sides and corners are destinations (Play, Create, Songs, Catalog / Profile, Shop, Settings, Updates). Arrow keys or WASD aim the ball, two keys aim at a corner, Enter or a second press goes. On phones, swipe to aim and lift to go.'],

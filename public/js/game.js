@@ -3,7 +3,7 @@ import { ctx, Player, loadSong, hitSound, missSound, energy } from './audio.js';
 import { points as timingPoints, beatAt } from './timing.js';
 import { drawBg, drawSide, drawTap, drawBall, spawnHit, stepParts } from './cosmetics.js';
 import { equipped, reward, levelOf, profile, TOKEN, fmtTok } from './profile.js';
-import { getVideo } from './util.js';
+import { getVideo, saveSettings } from './util.js';
 import { songKey } from './audio.js';
 import { DIR, COLORS, BALL, BAD, OPP, adjacent, getSettings, approachTime, setBest, getBest, api, esc, fmtNum, icon, clamp, $ } from './util.js';
 
@@ -53,23 +53,30 @@ export async function playChart(chart, opts = {}) {
   root.querySelector('[data-load]').remove();
 
   const player = new Player(buffer);
-  // background video (Settings → Background video, and the song has one)
-  let vid = null, vidUrl = null;
-  if (S.bgVideo) {
-    const blob = await getVideo(songKey(chart.song)).catch(() => null);
-    if (blob) {
-      vidUrl = URL.createObjectURL(blob);
-      vid = Object.assign(document.createElement('video'), { src: vidUrl, muted: true, playsInline: true, preload: 'auto' });
-      vid.setAttribute('playsinline', '');
-      await new Promise(r => { vid.addEventListener('loadeddata', r, { once: true }); vid.addEventListener('error', r, { once: true }); setTimeout(r, 4000); });
-      if (vid.error || !vid.videoWidth) { URL.revokeObjectURL(vidUrl); vid = null; vidUrl = null; }
-    }
+  // background video: loaded whenever the song has one, shown when Settings → Background video is on
+  let vid = null, vidUrl = null, vStarting = false, lastSeek = 0;
+  const vblob = await getVideo(songKey(chart.song)).catch(() => null);
+  if (vblob) {
+    vidUrl = URL.createObjectURL(vblob);
+    vid = Object.assign(document.createElement('video'), { src: vidUrl, muted: true, playsInline: true, preload: 'auto', loop: false });
+    vid.setAttribute('playsinline', ''); vid.setAttribute('muted', '');
+    if (S.bgVideo) await new Promise(r => { vid.addEventListener('loadeddata', r, { once: true }); vid.addEventListener('error', r, { once: true }); setTimeout(r, 5000); });
+    vid.addEventListener('error', () => { console.warn('background video failed to load', vid.error); });
   }
   function syncVideo(t) {
-    if (!vid) return;
-    if (paused || ended || t < 0 || t > vid.duration) { if (!vid.paused) vid.pause(); if (t < 0 && vid.currentTime > 0.05) vid.currentTime = 0; return; }
-    if (vid.paused) { vid.currentTime = t; vid.play().catch(() => {}); }
-    else if (Math.abs(vid.currentTime - t) > 0.12) vid.currentTime = t;
+    if (!vid || vid.error) return;
+    const want = S.bgVideo && !paused && !ended && t >= 0 && (!vid.duration || t < vid.duration);
+    if (!want) { if (!vid.paused) vid.pause(); vid.playbackRate = 1; return; }
+    if (vid.paused) { // start once, then let it run; never re-seek while play() is still pending
+      if (vStarting) return;
+      vStarting = true;
+      if (Math.abs(vid.currentTime - t) > 0.05) vid.currentTime = t;
+      Promise.resolve(vid.play()).catch(() => {}).finally(() => (vStarting = false));
+      return;
+    }
+    const drift = vid.currentTime - t, ms = performance.now();
+    if (Math.abs(drift) > 0.6 && !vid.seeking && ms - lastSeek > 1500) { lastSeek = ms; vid.playbackRate = 1; vid.currentTime = t + 0.03; }
+    else vid.playbackRate = Math.abs(drift) < 0.03 ? 1 : Math.max(0.9, Math.min(1.1, 1 - drift * 0.8));
   }
   const TP = timingPoints(chart);
   const approach = approachTime();
@@ -197,7 +204,7 @@ export async function playChart(chart, opts = {}) {
   const beginPos = startAt > 0 ? Math.max(-lead, startAt - 2) : -lead;
   if (chart.catalogId && !opts.playtest && !opts.autoplay) api('/charts/' + chart.catalogId + '/play', { method: 'POST', body: '{}' }).catch(() => {});
 
-  if (localStorage.getItem('bsq.debug')) window.__bsqGame = { player, notes, R, pause, resume, get paused() { return paused; } };
+  if (localStorage.getItem('bsq.debug')) window.__bsqGame = { vid: () => vid, player, notes, R, pause, resume, get paused() { return paused; } };
   let resolveDone;
   const done = new Promise(r => (resolveDone = r));
   current = () => finish(null, 'nav');
@@ -205,18 +212,19 @@ export async function playChart(chart, opts = {}) {
 
   function pause() {
     if (paused || ended) return;
-    paused = true; player.stop();
+    paused = true; player.stop(); if (vid) vid.pause();
     const ov = document.createElement('div');
     ov.className = 'overlay'; ov.dataset.pause = '1';
     ov.innerHTML = `<div class="panel frame pad" style="--c:var(--up)">
       <div class="head"><h2 class="sec-title">Paused</h2><span class="lbl">${esc(chart.title)}</span></div>
       <div class="menu-list">
         <button class="btn" data-a="resume">Resume <span class="keycap">Esc</span></button>
+        ${vid ? `<button class="btn ${S.bgVideo ? 'on' : ''}" data-a="video" style="--c:var(--right)">Background video: ${S.bgVideo ? 'on' : 'off'}</button>` : ''}
         <button class="btn" data-a="restart" style="--c:var(--left)">Restart</button>
         <button class="btn" data-a="quit" style="--c:var(--right)">${opts.playtest ? 'Back to editor' : 'Quit'}</button>
       </div></div>`;
     root.appendChild(ov);
-    ov.onclick = e => { const a = e.target.closest('[data-a]')?.dataset.a; if (a === 'resume') resume(); if (a === 'restart') { finish(null, 'restart'); } if (a === 'quit') finish(null, 'quit'); };
+    ov.onclick = e => { const a = e.target.closest('[data-a]')?.dataset.a; if (a === 'resume') resume(); if (a === 'video') { saveSettings({ bgVideo: !S.bgVideo }); const b = e.target.closest('[data-a]'); b.textContent = 'Background video: ' + (S.bgVideo ? 'on' : 'off'); b.classList.toggle('on', S.bgVideo); } if (a === 'restart') { finish(null, 'restart'); } if (a === 'quit') finish(null, 'quit'); };
     ov.querySelector('[data-a=resume]').focus();
   }
   function resume() {
@@ -232,7 +240,7 @@ export async function playChart(chart, opts = {}) {
 
   function finish(result, action) {
     if (ended) return; ended = true;
-    player.stop();
+    player.stop(); if (vid) vid.pause();
     cleanup();
     resolveDone({ result, action });
   }
@@ -313,7 +321,7 @@ export async function playChart(chart, opts = {}) {
     g.translate(sx, sy);
     g.lineCap = 'square';
     // background (equipped: tunnel / stars / grid floor / rain / void), reacts to bass/mid/high
-    if (vid && vid.readyState >= 2) {
+    if (S.bgVideo && vid && vid.readyState >= 2 && !vid.error) {
       // cover-fit the video, dimmed so the notes stay readable; it breathes a little with the bass
       const vw = vid.videoWidth, vh = vid.videoHeight, sc = Math.max(W / vw, H / vh) * (1.02 + pulse * 0.01);
       g.globalAlpha = 1; g.drawImage(vid, (W - vw * sc) / 2, (H - vh * sc) / 2, vw * sc, vh * sc);

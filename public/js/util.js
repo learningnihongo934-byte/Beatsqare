@@ -32,12 +32,13 @@ const DEFAULTS = {
   visualOffset: 0,     // ms; positive = draw notes later
   speed: 5,            // 1..10 → approach time
   volume: 0.85, hitVolume: 0.5, hitsounds: true,
-  crt: true, shake: true, particles: true, menuMusic: true, uiSounds: true, bgVideo: false, videoDim: 0.55,
+  crt: true, shake: true, particles: true, menuMusic: true, uiSounds: true, bgVideo: true, videoDim: 0.55,
   handle: '',
   theme: null, // { colors: [up, right, down, left], ball }
 };
 let settings;
 try { settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('bsq.settings') || '{}') }; } catch { settings = { ...DEFAULTS }; }
+if (!settings.mig18) { settings.bgVideo = true; settings.mig18 = true; } // v1.8: background video defaults on
 if (!settings.handle) { settings.handle = 'SQ-' + Math.floor(1000 + Math.random() * 9000); saveSettings(); }
 export function getSettings() { return settings; }
 export function saveSettings(patch) {

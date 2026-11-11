@@ -24,7 +24,7 @@ export async function playChart(chart, opts = {}) {
     <div class="prog"><i></i></div>
     <div class="hud">
       <div class="l"><div class="lbl">Score</div><div class="num glow" data-score>0</div></div>
-      <div class="c"><div class="song">${esc(chart.title)} · <span class="diff-${esc(chart.difficulty)}">${esc(chart.difficulty)}</span></div></div>
+      <div class="c"><div class="song">${esc(chart.title)} · <span class="diff-${esc(chart.difficulty)}">${esc(chart.difficulty)}</span>${opts.autoplay ? ' · <span style="color:var(--ball)">Autoplay</span>' : ''}</div></div>
       <div class="r"><div class="lbl">Accuracy</div><div class="num" data-acc>100.00%</div></div>
     </div>
     <button class="pause-btn" aria-label="Pause">${icon('pause')}</button>
@@ -75,7 +75,8 @@ export async function playChart(chart, opts = {}) {
   // ---------- input
   const keyHeld = [];             // lanes in press order (keyboard)
   const ptr = new Map();          // pointerId -> {x,y,lanes:[]}
-  const heldLanes = () => { const s = [...keyHeld]; for (const p of ptr.values()) for (const l of p.lanes) { const i = s.indexOf(l); if (i >= 0) s.splice(i, 1); s.push(l); } return s; };
+  const auto = [];               // autoplay: [{lane, until}]
+  const heldLanes = () => { const s = [...keyHeld, ...auto.map(a => a.lane)]; for (const p of ptr.values()) for (const l of p.lanes) { const i = s.indexOf(l); if (i >= 0) s.splice(i, 1); s.push(l); } return s; };
   function target() {
     const h = heldLanes(), a = h[h.length - 1], b = h[h.length - 2];
     if (a === undefined) return [0, 0];
@@ -113,7 +114,7 @@ export async function playChart(chart, opts = {}) {
     if (e.code === 'Escape' || e.code === 'KeyP') { e.preventDefault(); if (!ended && !root.querySelector('[data-res]')) paused ? resume() : pause(); return; }
     const L = KEYS[e.code]; if (L === undefined) return;
     e.preventDefault();
-    if (e.repeat) return;
+    if (e.repeat || opts.autoplay) return;
     if (!keyHeld.includes(L)) keyHeld.push(L);
     press(L, e.timeStamp);
   };
@@ -127,7 +128,7 @@ export async function playChart(chart, opts = {}) {
     return ax > ay * 2 ? [h] : ay > ax * 2 ? [v] : [h, v];
   };
   const onPDown = e => {
-    if (e.target.closest('.pause-btn,.overlay')) return;
+    if (opts.autoplay || e.target.closest('.pause-btn,.overlay')) return;
     ptr.set(e.pointerId, { x: e.clientX, y: e.clientY, lanes: [] });
     try { cv.setPointerCapture(e.pointerId); } catch {}
   };
@@ -169,7 +170,7 @@ export async function playChart(chart, opts = {}) {
   const firstT = notes.length ? notes[0].t : 0;
   const lead = Math.max(1.0, approach + 0.8 - (firstT - startAt));
   const beginPos = startAt > 0 ? Math.max(-lead, startAt - 2) : -lead;
-  if (chart.catalogId && !opts.playtest) api('/charts/' + chart.catalogId + '/play', { method: 'POST', body: '{}' }).catch(() => {});
+  if (chart.catalogId && !opts.playtest && !opts.autoplay) api('/charts/' + chart.catalogId + '/play', { method: 'POST', body: '{}' }).catch(() => {});
 
   if (localStorage.getItem('bsq.debug')) window.__bsqGame = { player, notes, R, pause, resume, get paused() { return paused; } };
   let resolveDone;
@@ -225,6 +226,15 @@ export async function playChart(chart, opts = {}) {
     const now = player.time();
     const judgeNow = now - offs();
     if (!paused && !ended) {
+      if (opts.autoplay) {
+        for (const n of notes) {
+          if (n.t > judgeNow) break;
+          if (n.st !== 0) continue;
+          n.st = n.len ? 1 : 2; judge(n, 'perfect'); hitSound(n.lane);
+          auto.push({ lane: n.lane, until: n.t + n.len + 0.07 });
+        }
+        for (let i = auto.length - 1; i >= 0; i--) if (auto[i].until <= judgeNow) auto.splice(i, 1);
+      }
       // misses and holds
       for (const n of notes) {
         if (n.t > judgeNow + WIN.good) break;
@@ -421,13 +431,13 @@ export async function playChart(chart, opts = {}) {
     const score = scoreNow(), grade = gradeOf(acc, ap);
     const result = { score, acc: +acc.toFixed(2), grade, fc, maxCombo: R.maxCombo, ...R };
     const key = chartKey(chart), prevBest = getBest(key);
-    const isBest = !opts.playtest && startAt === 0 && setBest(key, result);
+    const isBest = !opts.playtest && !opts.autoplay && startAt === 0 && setBest(key, result);
     const ov = document.createElement('div');
     ov.className = 'overlay'; ov.dataset.res = '1';
     const gcol = { SS: BALL, S: BALL, A: '#19f0ff', B: '#3dff7a', C: '#ffb020', D: BAD }[grade];
     ov.innerHTML = `<div class="res-grid">
       <div class="res-main frame pad" style="--c:${gcol}">
-        <div class="head"><span class="lbl">${opts.playtest ? 'Playtest' : 'Stage clear'}</span><span class="lbl">${esc(chart.title)} · ${esc(chart.difficulty)}</span></div>
+        <div class="head"><span class="lbl">${opts.autoplay ? 'Autoplay · not scored' : opts.playtest ? 'Playtest' : 'Stage clear'}</span><span class="lbl">${esc(chart.title)} · ${esc(chart.difficulty)}</span></div>
         <div style="display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap">
           <div class="res-grade glow" style="color:${gcol}">${grade}</div>
           <div><div class="lbl">Score${isBest ? ' · <span style="color:var(--ball)">New best</span>' : ''}</div><div class="num" style="font-size:44px">${fmtNum(score).padStart(7, '0')}</div>
@@ -448,12 +458,12 @@ export async function playChart(chart, opts = {}) {
       </div>
       <div class="res-side frame pad" style="--c:var(--right)">
         <div class="head"><span class="sec-title" style="font-size:20px">Leaderboard</span></div>
-        <div class="board" data-board>${chart.catalogId && !opts.playtest ? '<p class="muted">Sending score…</p>' : '<p class="muted">Publish this chart to the catalog to get an online leaderboard.</p>'}</div>
+        <div class="board" data-board>${chart.catalogId && !opts.playtest && !opts.autoplay ? '<p class="muted">Sending score…</p>' : '<p class="muted">Publish this chart to the catalog to get an online leaderboard.</p>'}</div>
       </div></div>`;
     root.appendChild(ov);
     ov.onclick = e => { const a = e.target.closest('[data-a]')?.dataset.a; if (a) finish(result, a === 'retry' ? 'restart' : a); };
     ov.querySelector('[data-a=retry]').focus();
-    if (chart.catalogId && !opts.playtest && startAt === 0) {
+    if (chart.catalogId && !opts.playtest && !opts.autoplay && startAt === 0) {
       try {
         const { scores } = await api('/charts/' + chart.catalogId + '/scores', { method: 'POST', body: JSON.stringify({ handle: S.handle, score, acc: result.acc, combo: R.maxCombo, grade, fc }) });
         const b = ov.querySelector('[data-board]');

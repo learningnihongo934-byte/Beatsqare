@@ -148,7 +148,7 @@ async function upload(req, env) {
   if (!len) return err('empty upload');
   if (len > MAX_UPLOAD) return err('file is over 24 MB');
   const mime = (req.headers.get('content-type') || '').split(';')[0];
-  if (!/^audio\//.test(mime) && mime !== 'application/ogg') return err('only audio files (mp3, ogg, wav)');
+  if (!/^audio\//.test(mime) && !['application/ogg', 'video/mp4'].includes(mime)) return err('only audio files (mp3, mp4, ogg, wav)');
   const name = clean(decodeURIComponent(req.headers.get('x-file-name') || 'song'), 120);
   const id = rid(12);
   const body = await req.arrayBuffer();

@@ -26,6 +26,13 @@ Judgements: Perfect ±40 ms, Great ±70 ms, Good ±110 ms (the prototype's tight
 - **Auto-chart** drafts a chart from onset detection at Easy/Normal/Hard/Expert, using per-band energy for lanes, sustain for holds and accents for chords.
 - **Playtest from here**, JSON export/import, and **Publish** to the online catalog.
 
+## .bsq packs
+A `.bsq` file is one song plus every chart for it, like an osu! `.osz`. It holds `BSQPACK1` (8 bytes), a uint32 LE header length, a UTF-8 JSON header (`format: "beatsqare-pack"`, title, artist, audio name/mime/size, `charts: [...]`), and then the raw audio bytes (mp3, mp4, wav or ogg).
+- **Import:** Play → *Import .bsq or chart JSON*. The audio stays in your browser; re-importing the same pack updates its charts instead of duplicating them.
+- **Export:** *Export .bsq* in song select or the editor bundles the song with every chart on this device that uses it.
+
+**Autoplay** (song select → *Autoplay · watch it*) plays a chart perfectly by itself. It doesn't count toward your best score or the leaderboard.
+
 ## Songs
 - **Built-in:** "Square One", a 128 BPM track synthesized in the browser with an OfflineAudioContext. The game ships no audio files.
 - **Audius** for search and discovery. It's free with no key, no account and no card, and its official API is meant for third-party players to stream from. (Jamendo needs a registered client id.) Every track shows its artist, its license and a link back to Audius, and a "Creative Commons only" filter is available.

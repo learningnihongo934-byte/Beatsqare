@@ -5,6 +5,7 @@ import { DEMO_CHARTS, newChart, saveCatalogChart, importChartFile } from './char
 import { playChart, chartKey } from './game.js';
 import { openEditor, getAnalysis } from './editor.js';
 import { detectBpm, autoChart } from './analysis.js';
+import { exportPack, downloadBytes } from './pack.js';
 
 const app = $('#app');
 const S = getSettings();
@@ -96,7 +97,7 @@ async function library(selId) {
         <div class="meta"><span class="lbl">${c.notes.length} notes</span>${best ? `<span class="grade" style="color:var(--ball)">${esc(best.grade)}</span>` : ''}</div></button>`;
     }).join('')}</div>
     <div class="detail frame pad" data-detail></div>
-    <div class="span-12 row"><label class="btn sm">${icon('up')}Import chart JSON<input type="file" accept=".json" hidden data-imp></label><a class="btn sm" href="#/create">New chart</a><a class="btn sm" href="#/catalog">Get charts from the catalog</a></div>
+    <div class="span-12 row"><label class="btn sm">${icon('up')}Import .bsq or chart JSON<input type="file" accept=".bsq,.json,application/json" hidden data-imp></label><a class="btn sm" href="#/create">New chart</a><a class="btn sm" href="#/catalog">Get charts from the catalog</a></div>
   </section>`;
   const car = $('.carousel'), carts = $$('.cart');
   function select(i, scroll = true) {
@@ -119,8 +120,9 @@ async function library(selId) {
       </div>
       <div class="act">
         <button class="btn pri" data-a="play" style="--c:var(--up);min-height:52px">${icon('play')}Play</button>
+        <button class="btn" data-a="auto" style="--c:var(--ball)">${icon('play')}Autoplay · watch it</button>
         ${own ? `<a class="btn" href="#/edit/${encodeURIComponent(c.id)}" style="--c:var(--left)">${icon('edit')}Edit</a>` : `<button class="btn" data-a="copy" style="--c:var(--left)">${icon('edit')}Edit a copy</button>`}
-        <button class="btn" data-a="export">${icon('down')}Export JSON</button>
+        <div class="row" style="gap:8px"><button class="btn" data-a="pack" style="flex:1" title="Song + every chart for it in one file">${icon('down')}Export .bsq</button><button class="btn" data-a="export" style="flex:1">${icon('down')}JSON</button></div>
         ${!c.builtin ? `<button class="btn" data-a="del" style="--c:var(--bad)">${icon('x')}Remove</button>` : ''}
       </div>`;
     previewSong(c.song);
@@ -134,6 +136,8 @@ async function library(selId) {
   $('[data-detail]').addEventListener('click', async e => {
     const a = e.target.closest('[data-a]')?.dataset.a, c = charts[idx];
     if (a === 'play') nav('#/play/' + encodeURIComponent(c.id));
+    if (a === 'auto') nav('#/play/' + encodeURIComponent(c.id) + '/auto');
+    if (a === 'pack') { toast('Packing…'); try { downloadBytes(slug(c.title) + '.bsq', await exportPack(c)); } catch (err) { toast('Export failed: ' + err.message, true); } }
     if (a === 'export') downloadText(slug(c.title) + '-' + c.difficulty.toLowerCase() + '.beatsqare.json', JSON.stringify({ format: 'beatsqare-chart', v: 1, ...c, id: undefined, builtin: undefined }, null, 1));
     if (a === 'copy') { const n = { ...c, id: uid(), builtin: undefined, catalogId: undefined, title: c.title + ' (edit)', created: Date.now(), updated: Date.now(), bpmSet: true }; delete n.builtin; await idb.putChart(n); nav('#/edit/' + n.id); }
     if (a === 'del' && confirm(`Remove "${c.title}" from this device?`)) { await idb.delChart(c.id); library(); }
@@ -184,13 +188,14 @@ function stopPreview() {
 }
 
 // ---------- play
-async function play(id) {
-  id = decodeURIComponent(id);
+async function play(arg) {
+  const [rawId, mode] = arg.split('/');
+  const id = decodeURIComponent(rawId), autoplay = mode === 'auto';
   const c = DEMO_CHARTS.find(x => x.id === id) || await idb.chart(id);
   if (!c) { toast('Chart not found', true); return nav('#/library'); }
   bgOn = false; app.innerHTML = '';
   let action = 'restart';
-  while (action === 'restart') ({ action } = await playChart(c, { editable: !c.builtin && !c.id.startsWith('cat-') }));
+  while (action === 'restart') ({ action } = await playChart(c, { autoplay, editable: !c.builtin && !c.id.startsWith('cat-') }));
   if (action === 'edit') nav('#/edit/' + encodeURIComponent(c.id));
   else nav('#/library/' + encodeURIComponent(c.id));
 }
@@ -200,15 +205,15 @@ function create() {
   app.innerHTML = `${bar('#/create')}<section class="page">
     <div class="span-12 head" style="margin:0"><h2 class="sec-title">New chart</h2><span class="lbl">Pick a song to chart</span></div>
     <div class="span-4 frame pad" style="--c:var(--up)"><div class="lbl">01</div><h3 class="disp" style="font-size:26px;margin:10px 0">Demo track</h3><p class="muted">Chart “Square One”, the built-in 128 BPM track. No download.</p><button class="btn pri" data-a="demo" style="--c:var(--up)">Start charting</button></div>
-    <div class="span-4 frame pad" style="--c:var(--down)"><div class="lbl">02</div><h3 class="disp" style="font-size:26px;margin:10px 0">Upload a song</h3><p class="muted">MP3, OGG or WAV up to 24 MB. It's stored online so your published charts play anywhere.</p>${dropZone()}</div>
+    <div class="span-4 frame pad" style="--c:var(--down)"><div class="lbl">02</div><h3 class="disp" style="font-size:26px;margin:10px 0">Upload a song</h3><p class="muted">MP3, MP4, OGG or WAV up to 24 MB. It's stored online so your published charts play anywhere.</p>${dropZone()}</div>
     <div class="span-4 frame pad" style="--c:var(--right)"><div class="lbl">03</div><h3 class="disp" style="font-size:26px;margin:10px 0">Find a song</h3><p class="muted">Search Audius, preview, and chart any streamable track. Artist and license are shown on every track.</p><a class="btn pri" href="#/songs" style="--c:var(--right)">${icon('search')}Search songs</a></div>
-    <div class="span-12 row"><label class="btn sm">${icon('up')}Import chart JSON<input type="file" accept=".json" hidden data-imp></label></div>
+    <div class="span-12 row"><label class="btn sm">${icon('up')}Import .bsq or chart JSON<input type="file" accept=".bsq,.json,application/json" hidden data-imp></label></div>
   </section>`;
   $('[data-a=demo]').onclick = async () => { const c = await newChart({ source: 'builtin', ref: 'square-one', license: 'Original, made for Beatsqare', credit: 'Beatsqare House Band' }); nav('#/edit/' + c.id); };
   wireDrop();
   $('[data-imp]').addEventListener('change', async e => { try { const c = await importChartFile(e.target.files[0]); nav('#/edit/' + c.id); } catch (err) { toast('Import failed: ' + err.message, true); } });
 }
-const dropZone = () => `<label class="drop" data-drop><input type="file" accept="audio/mpeg,audio/ogg,audio/wav,audio/x-wav,audio/*,.mp3,.ogg,.wav" hidden data-file><div class="lbl">Drop a file or click</div><div class="muted" style="font-size:11px;margin-top:6px" data-dmsg>mp3 · ogg · wav</div><div class="bar-prog"><i data-dprog></i></div></label>`;
+const dropZone = () => `<label class="drop" data-drop><input type="file" accept="audio/*,video/mp4,.mp3,.ogg,.wav,.mp4,.m4a" hidden data-file><div class="lbl">Drop a file or click</div><div class="muted" style="font-size:11px;margin-top:6px" data-dmsg>mp3 · mp4 · ogg · wav</div><div class="bar-prog"><i data-dprog></i></div></label>`;
 function wireDrop() {
   const z = $('[data-drop]'), inp = $('[data-file]');
   z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); });

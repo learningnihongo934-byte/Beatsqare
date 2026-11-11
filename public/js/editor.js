@@ -3,6 +3,7 @@
 import { ctx, Player, loadSong, hitSound, click, ac, songKey } from './audio.js';
 import { peaksOf, analyze, detectBpm, autoChart } from './analysis.js';
 import { playChart } from './game.js';
+import { exportPack, downloadBytes } from './pack.js';
 import { COLORS, BALL, LANE_NAMES, DIFFS, adjacent, idb, api, toast, esc, icon, fmtTime, clamp, downloadText, slug, getSettings, uploadFile } from './util.js';
 
 const analysisCache = new Map();
@@ -24,7 +25,8 @@ export async function openEditor(chartId, nav) {
       <div class="ttl"><input data-f="title" value="${esc(chart.title)}" aria-label="Chart title" maxlength="80"></div>
       <span class="lbl" data-saved>Saved</span>
       <button class="btn sm" data-a="playtest" style="--c:var(--down)" title="Playtest from the playhead (P)">${icon('play')}Playtest from here</button>
-      <button class="btn sm" data-a="export" title="Download chart JSON">${icon('down')}Export</button>
+      <button class="btn sm" data-a="pack" title="Song + charts in one .bsq file">${icon('down')}.bsq</button>
+      <button class="btn sm" data-a="export" title="Download chart JSON">${icon('down')}JSON</button>
       <label class="btn sm" title="Load chart JSON">${icon('up')}Import<input type="file" accept=".json,application/json" hidden data-import></label>
       <button class="btn sm pri" data-a="publish" style="--c:var(--right)">Publish</button>
       <button class="btn sm" data-a="side" aria-label="Chart info">${icon('menu')}</button>
@@ -244,6 +246,7 @@ export async function openEditor(chartId, nav) {
     if (a === 'playtest') await playtest();
     if (a === 'export') { await save(); downloadText(slug(chart.title) + '-' + chart.difficulty.toLowerCase() + '.beatsqare.json', exportJson()); }
     if (a === 'publish') await publish();
+    if (a === 'pack') { await save(); toast('Packing…'); try { downloadBytes(slug(chart.title) + '.bsq', await exportPack(chart)); } catch (err) { toast('Export failed: ' + err.message, true); } }
   });
   function zoom(f) { const t = player.playing ? player.time() : pos, cx = xOf(t); pps = clamp(pps * f, 50, 1600); viewStart = t - cx / pps; }
   root.addEventListener('change', e => {

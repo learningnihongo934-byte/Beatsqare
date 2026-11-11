@@ -1,6 +1,7 @@
 // Built-in charts for the synthesized demo song, plus helpers to create / import charts.
 import { DEMO, sectionOf } from './audio.js';
 import { idb, uid, DIFFS } from './util.js';
+import { isPack, importPack } from './pack.js';
 
 const LEAD = [69, 72, 74, 76, 74, 72, 69, 67, 69, 72, 76, 79, 76, 74, 72, 74];
 const pitchLane = (m, prev) => m >= 76 ? 0 : m <= 67 ? 2 : (prev === 1 ? 3 : 1);
@@ -78,7 +79,13 @@ export async function saveCatalogChart(c) {
 }
 
 export async function importChartFile(file) {
-  const d = JSON.parse(await file.text());
+  const buf = await file.arrayBuffer();
+  if (isPack(buf)) {
+    const made = await importPack(buf);
+    if (!made.length) throw new Error('pack has no charts');
+    return made.find(c => c.difficulty === 'Normal') || made[0];
+  }
+  const d = JSON.parse(new TextDecoder().decode(buf));
   if (!Array.isArray(d.notes) || !d.song) throw new Error('not a Beatsqare chart');
   const c = { ...d, id: uid(), bpmSet: true, created: Date.now(), updated: Date.now() };
   delete c.format; delete c.catalogId;

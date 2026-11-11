@@ -18,6 +18,7 @@ export function ctx() {
   if (ac.state === 'suspended') ac.resume();
   return ac;
 }
+export function songInput() { ctx(); return songGain; }
 export function applyVolume() {
   if (!ac) return;
   const s = getSettings();

@@ -2,6 +2,14 @@
 
 Also in the game at `#/updates`.
 
+## v1.3 — Menu music and a new song select (2026-11-10)
+
+- **New:** The home screen plays a random song from the ones on this device, with Skip and Mute. The background rings pulse on its beat.
+- **New:** New song select: a song wheel with search and sort, one row per song with difficulty pips and your best grade.
+- **New:** Each song gets a generated jacket (or its cover art), difficulty tabs, a note-density graph and stats.
+- **Improved:** Keys: ↑/↓ change song, ←/→ change difficulty, Enter plays, Shift+Enter autoplays, / searches.
+- **New:** Settings has a Menu music on/off switch.
+
 ## v1.2 — Packs and autoplay (2026-11-10)
 
 - **New:** Autoplay: song select → “Autoplay · watch it” plays a chart perfectly on its own. It isn’t scored.

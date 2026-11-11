@@ -24,7 +24,7 @@ const DEFAULTS = {
   visualOffset: 0,     // ms; positive = draw notes later
   speed: 5,            // 1..10 → approach time
   volume: 0.85, hitVolume: 0.5, hitsounds: true,
-  crt: true, shake: true, particles: true,
+  crt: true, shake: true, particles: true, menuMusic: true,
   handle: '',
 };
 let settings;

@@ -1,6 +1,16 @@
 // Update log, newest first. Shown at #/updates; the title screen flags a version you haven't seen.
 export const CHANGELOG = [
   {
+    v: '1.3', date: '2026-11-10', title: 'Menu music and a new song select',
+    items: [
+      ['new', 'The home screen plays a random song from the ones on this device, with Skip and Mute. The background rings pulse on its beat.'],
+      ['new', 'New song select: a song wheel with search and sort, one row per song with difficulty pips and your best grade.'],
+      ['new', 'Each song gets a generated jacket (or its cover art), difficulty tabs, a note-density graph and stats.'],
+      ['up', 'Keys: ↑/↓ change song, ←/→ change difficulty, Enter plays, Shift+Enter autoplays, / searches.'],
+      ['new', 'Settings has a Menu music on/off switch.'],
+    ],
+  },
+  {
     v: '1.2', date: '2026-11-10', title: 'Packs and autoplay',
     items: [
       ['new', 'Autoplay: song select → “Autoplay · watch it” plays a chart perfectly on its own. It isn’t scored.'],

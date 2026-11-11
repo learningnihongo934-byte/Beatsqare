@@ -7,6 +7,8 @@ import { openEditor, getAnalysis } from './editor.js';
 import { detectBpm, autoChart } from './analysis.js';
 import { exportPack, downloadBytes } from './pack.js';
 import { CHANGELOG, LATEST } from './changelog.js';
+import { songSelect, credit } from './select.js';
+import { playRandom, skip, toggleMute, stopMusic, onMusic, nowPlaying, beatPos, musicPos } from './music.js';
 
 const app = $('#app');
 const S = getSettings();
@@ -22,7 +24,8 @@ const bar = active => `<header class="bar"><div class="bar-in">
 // ---------- router
 async function route() {
   if (closeScreen) { const c = closeScreen; closeScreen = null; await c(); }
-  stopPreview();
+  const nextName = ((location.hash || '#/').match(/^#\/([\w-]*)/) || [])[1];
+  if (nextName === 'play' || nextName === 'edit') stopMusic(0.3);
   const h = location.hash || '#/';
   const [, name, arg] = h.match(/^#\/([\w-]*)\/?(.*)$/) || [];
   window.scrollTo(0, 0);
@@ -51,6 +54,7 @@ function title() {
       <div class="lbl" style="margin-bottom:18px">Four sides · one ball · your songs</div>
       <h1 class="disp"><span class="glow">Beat</span><span style="color:transparent;-webkit-text-stroke:1.5px var(--up);text-shadow:0 0 18px rgba(25,240,255,.45)">sqare</span></h1>
       <p>Notes fly in on four lanes. Snap the ball to the side they hit, hold through the tails, flick to the corner for chords. Then build your own charts on any song.</p>
+      <div class="np" data-np></div>
     </div>
     <nav class="menu" aria-label="Main menu">
       ${[['#/library', 'Play', 'Song select', 'up'], ['#/create', 'Create', 'Level editor', 'right'], ['#/songs', 'Songs', 'Search · upload', 'down'], ['#/catalog', 'Catalog', 'Community charts', 'left'], ['#/settings', 'Settings', 'Offset · speed', 'up']]
@@ -63,6 +67,22 @@ function title() {
     </div></section>`;
   $('.menu a').focus({ preventScroll: true });
   arrowNav($$('.menu a'));
+  const np = $('[data-np]');
+  const draw = info => {
+    if (!getSettings().menuMusic) { np.innerHTML = `<span class="lbl">Menu music off</span><button class="btn sm" data-np="mute">Turn on</button>`; return; }
+    if (!info) { np.innerHTML = `<span class="lbl">${ac && ac.state === 'running' ? 'Picking a song…' : 'Click or press a key for music'}</span>`; return; }
+    np.innerHTML = `<span class="lbl">Now playing</span><div class="np-t"><b>${esc(info.title)}</b><span class="muted">${esc(info.artist || '')}</span></div><div class="np-bar"><i data-npbar></i></div>
+      <div class="row"><button class="btn sm" data-np="skip">Skip</button><button class="btn sm" data-np="mute">Mute</button></div>`;
+  };
+  np.addEventListener('click', e => { const a = e.target.closest('[data-np]')?.dataset.np; if (a === 'skip') skip(); if (a === 'mute') { toggleMute(); draw(nowPlaying()); } });
+  const off = onMusic(draw); draw(nowPlaying());
+  const begin = () => { if (!nowPlaying()) playRandom(); };
+  if (ac && ac.state === 'running') begin();
+  const gesture = () => { ctx(); begin(); };
+  addEventListener('pointerdown', gesture, { once: true }); addEventListener('keydown', gesture, { once: true });
+  let raf = requestAnimationFrame(function tick() { raf = requestAnimationFrame(tick); const i = nowPlaying(), b = $('[data-npbar]'); if (i && b && i.duration) b.style.width = Math.min(100, musicPos() / i.duration * 100) + '%'; });
+  const closeNav = closeScreen;
+  closeScreen = () => { closeNav && closeNav(); off(); cancelAnimationFrame(raf); removeEventListener('pointerdown', gesture); removeEventListener('keydown', gesture); };
 }
 function arrowNav(items) {
   const onKey = e => {
@@ -74,121 +94,8 @@ function arrowNav(items) {
   closeScreen = () => removeEventListener('keydown', onKey);
 }
 
-// ---------- library / song select
-async function allCharts() {
-  const mine = (await idb.charts().catch(() => [])).sort((a, b) => (b.updated || b.downloaded || 0) - (a.updated || a.downloaded || 0));
-  return [...DEMO_CHARTS, ...mine];
-}
-function fingerprint(c) {
-  const n = 40, bins = Array.from({ length: n }, () => [0, 0, 0, 0]), d = c.duration || (c.notes.length ? c.notes[c.notes.length - 1].t + 2 : 60);
-  for (const x of c.notes) bins[Math.min(n - 1, Math.floor(x.t / d * n))][x.lane]++;
-  const mx = Math.max(1, ...bins.map(b => b[0] + b[1] + b[2] + b[3]));
-  let s = '';
-  bins.forEach((b, i) => { let y = 40; for (let L = 0; L < 4; L++) { const h = b[L] / mx * 38; if (h > 0) { y -= h; s += `<rect x="${i * 5}" y="${y.toFixed(1)}" width="3.4" height="${h.toFixed(1)}" fill="${COLORS[L]}"/>`; } } });
-  return `<svg class="wave" viewBox="0 0 200 40" preserveAspectRatio="none">${s}</svg>`;
-}
-async function library(selId) {
-  const charts = await allCharts();
-  let idx = Math.max(0, charts.findIndex(c => c.id === decodeURIComponent(selId || '')));
-  app.innerHTML = `${bar('#/library')}<section class="page">
-    <div class="span-12 head" style="margin:0"><h2 class="sec-title">Song select</h2><span class="lbl">${charts.length} charts · ← → choose · Enter play</span></div>
-    <div class="carousel" tabindex="0">${charts.map((c, i) => {
-      const best = getBest(chartKey(c)), col = ['up', 'right', 'down', 'left'][i % 4];
-      return `<button class="cart" data-i="${i}" style="--c:var(--${col})">
-        ${c.song.art ? `<div class="art" style="background-image:url('${esc(c.song.art)}')"></div>` : ''}${fingerprint(c)}
-        <div style="position:relative"><span class="badge diff-${esc(c.difficulty)}">${esc(c.difficulty)} ${c.level || ''}</span>${c.builtin ? ' <span class="badge dim">Demo</span>' : c.id.startsWith('cat-') ? ' <span class="badge dim">Catalog</span>' : ''}<h3 style="margin-top:10px">${esc(c.title)}</h3><div class="muted" style="font-size:11px;margin-top:4px">${esc(c.artist || '')}</div></div>
-        <div class="meta"><span class="lbl">${c.notes.length} notes</span>${best ? `<span class="grade" style="color:var(--ball)">${esc(best.grade)}</span>` : ''}</div></button>`;
-    }).join('')}</div>
-    <div class="detail frame pad" data-detail></div>
-    <div class="span-12 row"><label class="btn sm">${icon('up')}Import .bsq or chart JSON<input type="file" accept=".bsq,.json,application/json" hidden data-imp></label><a class="btn sm" href="#/create">New chart</a><a class="btn sm" href="#/catalog">Get charts from the catalog</a></div>
-  </section>`;
-  const car = $('.carousel'), carts = $$('.cart');
-  function select(i, scroll = true) {
-    idx = clamp(i, 0, charts.length - 1);
-    carts.forEach((c, j) => c.classList.toggle('sel', j === idx));
-    if (scroll) carts[idx].scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    const c = charts[idx], best = getBest(chartKey(c)), own = !c.builtin && !c.id.startsWith('cat-');
-    $('[data-detail]').style.setProperty('--c', `var(--${['up', 'right', 'down', 'left'][idx % 4]})`);
-    $('[data-detail]').innerHTML = `<div class="info">
-        <div class="row"><span class="badge diff-${esc(c.difficulty)}">${esc(c.difficulty)} · Lv ${c.level || '?'}</span>${c.catalogId ? `<span class="badge dim">Published</span>` : ''}</div>
-        <h2 class="disp" style="font-size:clamp(28px,4vw,48px);margin-top:12px">${esc(c.title)}</h2>
-        <div class="muted" style="margin-top:6px">${esc(c.artist || 'Unknown artist')}${c.author ? ' · chart by ' + esc(c.author) : ''}</div>
-        <div class="stat-row">
-          <div><span class="lbl">BPM</span><span class="num">${+(+c.bpm).toFixed(2)}</span></div>
-          <div><span class="lbl">Length</span><span class="num">${fmtTime(c.duration)}</span></div>
-          <div><span class="lbl">Notes</span><span class="num">${c.notes.length}</span></div>
-          <div><span class="lbl">Best</span><span class="num" style="color:var(--ball)">${best ? fmtNum(best.score) : '—'}</span>${best ? `<span class="lbl">${esc(best.grade)} · ${best.acc}%${best.fc ? ' · FC' : ''}</span>` : ''}</div>
-        </div>
-        <p class="credit">${credit(c.song)}</p>
-      </div>
-      <div class="act">
-        <button class="btn pri" data-a="play" style="--c:var(--up);min-height:52px">${icon('play')}Play</button>
-        <button class="btn" data-a="auto" style="--c:var(--ball)">${icon('play')}Autoplay · watch it</button>
-        ${own ? `<a class="btn" href="#/edit/${encodeURIComponent(c.id)}" style="--c:var(--left)">${icon('edit')}Edit</a>` : `<button class="btn" data-a="copy" style="--c:var(--left)">${icon('edit')}Edit a copy</button>`}
-        <div class="row" style="gap:8px"><button class="btn" data-a="pack" style="flex:1" title="Song + every chart for it in one file">${icon('down')}Export .bsq</button><button class="btn" data-a="export" style="flex:1">${icon('down')}JSON</button></div>
-        ${!c.builtin ? `<button class="btn" data-a="del" style="--c:var(--bad)">${icon('x')}Remove</button>` : ''}
-      </div>`;
-    previewSong(c.song);
-  }
-  car.addEventListener('click', e => { const b = e.target.closest('.cart'); if (!b) return; const i = +b.dataset.i; if (i === idx) nav('#/play/' + encodeURIComponent(charts[i].id)); else select(i); });
-  let st; car.addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(() => {
-    const r = car.getBoundingClientRect(), mid = r.left + r.width / 2;
-    let bi = idx, bd = 1e9; carts.forEach((c, j) => { const cr = c.getBoundingClientRect(), d = Math.abs(cr.left + cr.width / 2 - mid); if (d < bd) { bd = d; bi = j; } });
-    if (bi !== idx) select(bi, false);
-  }, 120); });
-  $('[data-detail]').addEventListener('click', async e => {
-    const a = e.target.closest('[data-a]')?.dataset.a, c = charts[idx];
-    if (a === 'play') nav('#/play/' + encodeURIComponent(c.id));
-    if (a === 'auto') nav('#/play/' + encodeURIComponent(c.id) + '/auto');
-    if (a === 'pack') { toast('Packing…'); try { downloadBytes(slug(c.title) + '.bsq', await exportPack(c)); } catch (err) { toast('Export failed: ' + err.message, true); } }
-    if (a === 'export') downloadText(slug(c.title) + '-' + c.difficulty.toLowerCase() + '.beatsqare.json', JSON.stringify({ format: 'beatsqare-chart', v: 1, ...c, id: undefined, builtin: undefined }, null, 1));
-    if (a === 'copy') { const n = { ...c, id: uid(), builtin: undefined, catalogId: undefined, title: c.title + ' (edit)', created: Date.now(), updated: Date.now(), bpmSet: true }; delete n.builtin; await idb.putChart(n); nav('#/edit/' + n.id); }
-    if (a === 'del' && confirm(`Remove "${c.title}" from this device?`)) { await idb.delChart(c.id); library(); }
-  });
-  $('[data-imp]').addEventListener('change', async e => { try { const c = await importChartFile(e.target.files[0]); toast('Imported ' + c.title); library(c.id); } catch (err) { toast('Import failed: ' + err.message, true); } });
-  const onKey = e => {
-    if (e.target.matches('input')) return;
-    if (e.key === 'ArrowRight' || e.key === 'd') { e.preventDefault(); select(idx + 1); }
-    if (e.key === 'ArrowLeft' || e.key === 'a') { e.preventDefault(); select(idx - 1); }
-    if (e.key === 'Enter') { e.preventDefault(); nav('#/play/' + encodeURIComponent(charts[idx].id)); }
-  };
-  addEventListener('keydown', onKey);
-  closeScreen = () => removeEventListener('keydown', onKey);
-  select(idx);
-}
-const credit = song => {
-  if (!song) return '';
-  if (song.source === 'builtin') return 'Song: original track synthesized in your browser.';
-  const lic = esc(song.license || '');
-  const who = esc(song.credit || '');
-  if (song.source === 'audius') return `Song by <b>${who}</b> · ${lic} · streamed via ${song.link ? `<a href="${esc(song.link)}" target="_blank" rel="noopener">Audius</a>` : 'Audius'}`;
-  return `Song: ${who}${lic ? ' · ' + lic : ''}`;
-};
-
-// gentle song preview on the select screen (only if the audio is already on this device)
-let prev = null;
-async function previewSong(song) {
-  stopPreview();
-  const token = prev = { stop: false };
-  setTimeout(async () => {
-    if (token.stop) return;
-    if (song.source !== 'builtin' && !(await idb.audio(songKey(song)).catch(() => null))) return;
-    if (!ac || token.stop) return;
-    try {
-      const buf = await loadSong(song); if (token.stop) return;
-      const s = ac.createBufferSource(), gn = ac.createGain();
-      s.buffer = buf; s.connect(gn).connect(ac.destination);
-      const t = ac.currentTime, v = S.volume * 0.5;
-      gn.gain.setValueAtTime(0.0001, t); gn.gain.exponentialRampToValueAtTime(v, t + 0.8);
-      s.start(t, buf.duration * 0.35); token.src = s; token.g = gn;
-    } catch {}
-  }, 350);
-}
-function stopPreview() {
-  if (!prev) return; prev.stop = true;
-  if (prev.src && ac) { const t = ac.currentTime; prev.g.gain.cancelScheduledValues(t); prev.g.gain.setValueAtTime(prev.g.gain.value, t); prev.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25); prev.src.stop(t + 0.3); }
-  prev = null;
-}
+// ---------- song select (select.js)
+async function library(selId) { closeScreen = await songSelect(app, bar, nav, selId); }
 
 // ---------- play
 async function play(arg) {
@@ -295,6 +202,7 @@ function songs() {
     if (b.dataset.a === 'prev') {
       if (audioEl && audioEl.dataset.id === t.id && !audioEl.paused) { audioEl.pause(); b.innerHTML = icon('play') + 'Preview'; return; }
       if (audioEl) audioEl.pause();
+      stopMusic(0.3);
       $$('[data-a=prev]').forEach(x => (x.innerHTML = icon('play') + 'Preview'));
       audioEl = new Audio('/api/audius/stream/' + t.id); audioEl.dataset.id = t.id; audioEl.volume = S.volume;
       audioEl.play().catch(() => toast('Preview failed', true)); b.innerHTML = icon('pause') + 'Stop';
@@ -391,7 +299,7 @@ function settings() {
     ['volume', 'Music volume', 0, 1, 0.05, v => Math.round(v * 100) + '%'],
     ['hitVolume', 'Hit sound volume', 0, 1, 0.05, v => Math.round(v * 100) + '%'],
   ];
-  const toggles = [['hitsounds', 'Hit sounds'], ['crt', 'CRT bloom + scanlines'], ['shake', 'Screen shake on miss'], ['particles', 'Hit particles']];
+  const toggles = [['menuMusic', 'Menu music'], ['hitsounds', 'Hit sounds'], ['crt', 'CRT bloom + scanlines'], ['shake', 'Screen shake on miss'], ['particles', 'Hit particles']];
   app.innerHTML = `${bar('#/settings')}<section class="page">
     <div class="span-12 head" style="margin:0"><h2 class="sec-title">Settings</h2><span class="lbl">Saved on this device</span></div>
     <div class="span-7">
@@ -412,6 +320,7 @@ function settings() {
     const k = e.target.dataset.k; if (!k) return;
     const v = e.target.type === 'checkbox' ? e.target.checked : e.target.type === 'range' ? +e.target.value : e.target.value.trim().slice(0, 24);
     saveSettings({ [k]: v }); applyVolume();
+    if (k === 'menuMusic' && !v) stopMusic(0.4);
     if (fmt[k]) $(`[data-v="${k}"]`).textContent = fmt[k](v);
   });
   // calibration
@@ -422,7 +331,7 @@ function settings() {
   const sq = $('[data-sq]');
   function stopCal() { cancelAnimationFrame(raf); clicks = []; }
   $('[data-a=start]').onclick = () => {
-    ctx(); stopCal(); taps = []; result = null; $('[data-taps]').innerHTML = ''; $('[data-res]').textContent = ''; $('[data-a=apply]').disabled = true;
+    ctx(); stopMusic(0.2); stopCal(); taps = []; result = null; $('[data-taps]').innerHTML = ''; $('[data-res]').textContent = ''; $('[data-a=apply]').disabled = true;
     const t0 = ac.currentTime + 0.6, iv = 0.6, n = mode === 'audio' ? 16 : 40;
     for (let i = 0; i < n; i++) { clicks.push(t0 + i * iv); click(t0 + i * iv, i % 4 === 0); }
     $('[data-cmsg]').textContent = mode === 'audio' ? 'Tap on every click' : 'Watch, then adjust Visual offset';
@@ -490,8 +399,8 @@ function bgFrame(ts) {
   if (!bgOn || document.hidden) return;
   const dt = Math.min(0.05, (ts - lastT) / 1000); lastT = ts;
   const [lo, mid] = energy();
-  const bpm = 100, b = Math.floor(ts / 1000 / (60 / bpm));
-  if (b !== lastB) { lastB = b; rings.push({ s: 0.2, a: b % 4 === 0 ? 0.9 : 0.45 }); }
+  const bp = beatPos(), beats = bp !== null ? bp : ts / 1000 / 0.6, b = Math.floor(beats);
+  if (b !== lastB) { lastB = b; rings.push({ s: 0.2, a: ((b % 4) + 4) % 4 === 0 ? 0.9 : 0.45 }); }
   const X = bgW * (bgW > 860 ? 0.72 : 0.5), Y = bgH * 0.55, base = Math.min(bgW, bgH) * 0.09;
   bgc.fillStyle = '#05050a'; bgc.fillRect(0, 0, bgW, bgH);
   bgc.lineWidth = 1; bgc.strokeStyle = '#141a2a';
@@ -503,7 +412,7 @@ function bgFrame(ts) {
     bgc.strokeStyle = `rgba(58,76,122,${Math.min(0.9, a)})`; bgc.strokeRect(X - s, Y - s, s * 2, s * 2);
   }
   rings = rings.filter(r => r.s < 3);
-  const ph = (ts / 1000 / (60 / bpm)) % 1, pulse = Math.exp(-ph * 4);
+  const ph = beats - b, pulse = Math.exp(-ph * 4);
   for (let L = 0; L < 4; L++) {
     bgc.strokeStyle = COLORS[L]; bgc.globalAlpha = 0.18 + pulse * 0.12 + mid * 0.4; bgc.lineWidth = 2;
     bgc.beginPath();

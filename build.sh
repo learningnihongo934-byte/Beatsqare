@@ -6,7 +6,7 @@
 set -e
 cd "$(dirname "$0")"
 W="npx -y wrangler@4"
-check() { for f in src/*.js public/js/*.js; do node --check "$f" || exit 1; done; echo "JS OK"; }
+check() { for f in src/*.js public/js/*.js; do node --check "$f" || exit 1; done; python3 tools/changelog.py; echo "JS OK"; }
 case "$1" in
   dev)
     check

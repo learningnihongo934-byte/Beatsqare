@@ -6,6 +6,7 @@ import { playChart, chartKey } from './game.js';
 import { openEditor, getAnalysis } from './editor.js';
 import { detectBpm, autoChart } from './analysis.js';
 import { exportPack, downloadBytes } from './pack.js';
+import { CHANGELOG, LATEST } from './changelog.js';
 
 const app = $('#app');
 const S = getSettings();
@@ -34,6 +35,7 @@ async function route() {
   if (name === 'songs') return songs();
   if (name === 'catalog') return catalog();
   if (name === 'settings') return settings();
+  if (name === 'updates') return updates();
   title();
 }
 const nav = h => { if (location.hash === h) route(); else location.hash = h; };
@@ -57,6 +59,7 @@ function title() {
     <div class="title-foot lbl">
       <span><span class="keycap">↑</span><span class="keycap">←</span><span class="keycap">↓</span><span class="keycap">→</span> or <span class="keycap">W</span><span class="keycap">A</span><span class="keycap">S</span><span class="keycap">D</span> snap to a side</span>
       <span>Two keys = corner chord</span><span>Phone: swipe, diagonal = corner</span><span><span class="keycap">Esc</span> pause</span>
+      <a href="#/updates" style="margin-left:auto;text-decoration:none;color:var(--ink)">v${LATEST} · Update log${seenVersion() !== LATEST ? ' <span class="badge" style="color:var(--ball)">New</span>' : ''}</a>
     </div></section>`;
   $('.menu a').focus({ preventScroll: true });
   arrowNav($$('.menu a'));
@@ -461,6 +464,20 @@ function settings() {
     toast('Audio offset set to ' + S.audioOffset + ' ms');
   };
   closeScreen = () => { stopCal(); removeEventListener('keydown', onTap); };
+}
+
+// ---------- update log
+const seenVersion = () => { try { return localStorage.getItem('bsq.seenVersion'); } catch { return null; } };
+function updates() {
+  try { localStorage.setItem('bsq.seenVersion', LATEST); } catch {}
+  const tag = { new: ['New', 'down'], up: ['Improved', 'up'], fix: ['Fixed', 'left'] };
+  app.innerHTML = `${bar('')}<section class="page">
+    <div class="span-12 head" style="margin:0"><h2 class="sec-title">Update log</h2><span class="lbl">Current version ${LATEST}</span></div>
+    ${CHANGELOG.map((r, i) => `<article class="span-12 frame pad" style="--c:var(--${['up', 'right', 'down', 'left'][i % 4]})">
+      <div class="head"><span class="num" style="font-size:28px">v${r.v}</span><h3 class="disp" style="font-size:20px">${esc(r.title)}</h3><span class="lbl">${r.date}</span></div>
+      <ul style="list-style:none;margin:0;padding:0;display:grid;gap:10px">${r.items.map(([k, t]) => `<li style="display:grid;grid-template-columns:84px 1fr;gap:12px;align-items:baseline"><span class="badge c-${tag[k][1]}">${tag[k][0]}</span><span>${esc(t)}</span></li>`).join('')}</ul>
+    </article>`).join('')}
+  </section>`;
 }
 
 // ---------- menu background: vector tunnel, beat rings, reacts to whatever is playing

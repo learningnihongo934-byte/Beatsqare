@@ -53,6 +53,8 @@ Everything runs on the Cloudflare free plan, with no payment card.
 ./build.sh check    # syntax check
 ```
 
+Update log: [CHANGELOG.md](CHANGELOG.md), also in the game at `#/updates`.
+
 Prototype: `~/Documents/BeatSquare/index.html`. The tuning comes from it (ball ease k=45, 1.4 s approach at speed 5, ±110 ms window).
 
 Made by **Virat Reddy Kaukuntla** ([@learningnihongo934-byte](https://github.com/learningnihongo934-byte))
